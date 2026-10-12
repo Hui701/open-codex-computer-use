@@ -181,7 +181,7 @@ evaluation. `ocu repl` keeps them for the current terminal session until
 `.exit`, Ctrl-D, or termination; `.reset` clears its bindings. On macOS, the
 separate hidden `Open Computer Use.app` permission agent may remain resident so
 later commands reuse the same permission identity. `ocu mcp` continues to expose
-the native nine-tool compatibility surface.
+the nine core native tools, plus `query` on macOS.
 
 The npm launcher itself currently requires Node.js 18 or newer. Its help always lists
 `js` / `repl`, while `ocu capabilities --json` reports whether Node, the REPL
@@ -189,6 +189,10 @@ adapter/kernel, and the native runtime are available. Once started, it reuses
 the current Node executable instead of looking up another `node` on PATH.
 
 `ocu doctor --json` (macOS only) returns `platform`, `accessibilityTrusted`, `screenCaptureGranted`, `allGranted`, and `missingPermissions`. Missing permissions still exit with code 0; hosts should check `allGranted` and query again after authorization. The snapshot uses existing system API/TCC diagnostics and does not prove an operation succeeded; some permission changes may still require a process restart.
+
+### Targeted query (macOS)
+
+Find controls by text or role without taking a screenshot. See [query usage](docs/targeted-query.md).
 
 ## Cursor Motion
 

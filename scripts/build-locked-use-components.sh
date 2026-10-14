@@ -90,10 +90,19 @@ xcrun clang -std=c11 -Wall -Wextra -Werror -mmacosx-version-min=14.0 -framework 
 test_output="$(mktemp -d "$output/task-verifier-checks.XXXXXX")"
 xcrun clang -Wall -Wextra -Werror -mmacosx-version-min=14.0 "-DOCU_SIGNING_TEAM=\"$team\"" -c \
   experiments/LockedUse/AuthorizationPlugin/TaskVerifierTests.c -o "$test_output/task-verifier-tests.o"
-xcrun swiftc -target "$native_arch-apple-macos14.0" "$test_output/task-verifier-tests.o" "$output/plugin-$native_arch/task-verifier.o" \
+xcrun swiftc -parse-as-library -emit-object -target "$native_arch-apple-macos14.0" \
+  -module-name OCUTaskVerifierDiagnostics experiments/LockedUse/AuthorizationPlugin/TaskVerifierDiagnostics.swift \
+  -o "$test_output/task-verifier-diagnostics.o"
+xcrun swiftc -target "$native_arch-apple-macos14.0" "$test_output/task-verifier-diagnostics.o" "$test_output/task-verifier-tests.o" "$output/plugin-$native_arch/task-verifier.o" \
   -o "$test_output/task-verifier-tests"
 locked_use_sign --force --options runtime --timestamp --identifier dev.opencomputeruse.locked-use.broker \
   --sign "$identity" "$test_output/task-verifier-tests"
+authority="$(codesign -dv --verbose=4 "$test_output/task-verifier-tests" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)"
+if [[ "$authority" == 'Developer ID Application:'* ]]; then
+  echo 'Task verifier diagnostic signer: Developer ID Application'
+else
+  echo 'Task verifier diagnostic signer: not Developer ID Application'
+fi
 "$test_output/task-verifier-tests" match
 rm -f "$test_output/task-verifier-wrong-id"
 cp "$test_output/task-verifier-tests" "$test_output/task-verifier-wrong-id"

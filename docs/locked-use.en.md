@@ -6,7 +6,7 @@ Locked Use lets an agent keep using GUI apps while your Mac is locked. Shields c
 
 ## How to enable it
 
-You need macOS 14 or later and a signed OCU app that includes the Locked Use components. For a source build, set `OPEN_COMPUTER_USE_INCLUDE_LOCKED_USE=1`.
+You need macOS 14 or later and a signed OCU app that includes the Locked Use components. Signed release builds include these components by default. For a development build, set `OPEN_COMPUTER_USE_INCLUDE_LOCKED_USE=1`.
 
 Unlock your Mac normally, then run this command and complete the administrator prompt:
 

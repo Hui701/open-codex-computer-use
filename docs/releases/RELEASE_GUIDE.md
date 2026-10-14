@@ -184,10 +184,11 @@ gh run view -R iFurySt/open-codex-computer-use <run-id> --log-failed
 
 ## 当前已知边界
 
-- `Open Computer Use` 的 npm release 产物在没有配置 `OPEN_COMPUTER_USE_CODESIGN_P12_BASE64` / `OPEN_COMPUTER_USE_CODESIGN_P12_PASSWORD` 等 secrets 时，仍会退回 ad-hoc signing；配置后会先导入 `Developer ID Application` 证书，再按该 identity 统一签名。
+- `Open Computer Use` 的正式 npm / 直接下载制品需要配置 `OPEN_COMPUTER_USE_CODESIGN_P12_BASE64` / `OPEN_COMPUTER_USE_CODESIGN_P12_PASSWORD`；导入 Developer ID 身份后按同一 team 签名主 App 与 Locked Use 组件。缺少签名时正式发布失败；日常无签名构建可显式关闭 Locked Use 嵌入。
 - 如果 Open Computer Use 已使用 Developer ID 签名且 `APPLE_NOTARY_*` secrets 齐全，workflow 会 notarize 并 staple direct-download `.app` 后重新生成 app zip、checksums 和 manifest；缺少任一条件时跳过 notarization。
 - `Cursor Motion` 当前 release 资产会优先复用 `OPEN_COMPUTER_USE_CODESIGN_*` 对 app 做 `Developer ID Application` 签名；如果同时配置 `APPLE_NOTARY_API_KEY_P8_BASE64`、`APPLE_NOTARY_KEY_ID`、`APPLE_NOTARY_ISSUER_ID`、`APPLE_DEVELOPER_TEAM_ID`，workflow 会继续对 `.dmg` 执行 notarization 和 staple。
-- 如果上述 secrets 缺失，workflow 会分别退回 ad-hoc signing 或跳过 notarization，而不是阻塞整条 release。
+- Open Computer Use 的正式发布必须包含 Locked Use 签名组件，缺少 Apple 签名身份时构建失败，不能静默发布不完整的 App；公证凭据缺失仍可跳过 notarization。
+- 签名 release App 默认自动构建并内嵌与主 App 同架构的 Locked Use 组件；支持 native / arm64 / x86_64 / universal。CI 显式设置 OPEN_COMPUTER_USE_INCLUDE_LOCKED_USE=1，制品检查覆盖四个组件的架构和严格嵌套签名。
 - `open-computer-use` npm root 包会内置六个 `os-arch` native artifacts，包体积会比 macOS-only 版本更大；release 前要确认 staging 包里包含 `dist/Open Computer Use.app`、`dist/linux/` 和 `dist/windows/`，并确认 launcher 没有声明 `optionalDependencies`。
 - 直接下载的 Linux / Windows CLI archive 只包含 native CLI / MCP runtime；`ocu js` / `ocu repl` 所需的 Node adapter 继续通过 npm 包分发。
 - macOS direct download 必须保留完整 `.app` bundle；不要单独分发 `Contents/MacOS/OpenComputerUse`，否则无法可靠复用 app-scoped 权限身份。

@@ -373,21 +373,27 @@ cat > "${contents_dir}/Info.plist" <<PLIST
 </plist>
 PLIST
 
-if [[ "${OPEN_COMPUTER_USE_INCLUDE_LOCKED_USE:-0}" == 1 ]]; then
-  if [[ "${arch_mode}" != native ]]; then
-    echo 'Locked Use components currently require the native architecture build.' >&2
+locked_use_requested="${OPEN_COMPUTER_USE_INCLUDE_LOCKED_USE:-auto}"
+locked_use_identity="$(resolve_codesign_identity || true)"
+if [[ "$locked_use_requested" == auto ]]; then
+  locked_use_requested=0
+  if [[ "$configuration" == release && -n "$locked_use_identity" && "$locked_use_identity" != - ]]; then
+    locked_use_requested=1
+  fi
+fi
+if [[ "$locked_use_requested" == 1 ]]; then
+  if [[ -z "$locked_use_identity" || "$locked_use_identity" == - ]]; then
+    echo 'Locked Use requires an Apple signing identity; refusing an incomplete release.' >&2
     exit 1
   fi
+  scripts/build-locked-use-components.sh --configuration "$configuration" --arch "$arch_mode" --identity "$locked_use_identity"
   locked_use_components="${repo_root}/.build/locked-use/components"
   guardian_component="OCU Guardian (Dev).app"
   if [[ "${app_variant}" == release ]]; then
     locked_use_components="${repo_root}/.build/locked-use/components-release"
     guardian_component="OCU Guardian.app"
   fi
-  if [[ ! -x "${locked_use_components}/OCULockInstaller" ]]; then
-    echo 'Build signed Locked Use components before embedding them.' >&2
-    exit 1
-  fi
+  if [[ "$arch_mode" != native ]]; then locked_use_components="$locked_use_components-$arch_mode"; fi
   mkdir -p "${resources_dir}/LockedUse"
   for component in OCULockService OCULockInstaller OCULockAuth.bundle; do
     ditto "${locked_use_components}/${component}" "${resources_dir}/LockedUse/${component}"
@@ -397,5 +403,8 @@ fi
 
 plutil -lint "${contents_dir}/Info.plist" >/dev/null
 codesign_app_bundle "${app_root}"
+if [[ "$locked_use_requested" == 1 ]]; then
+  scripts/verify-locked-use-bundle.sh "$app_root"
+fi
 
 echo "Built ${app_root} (${arch_mode}, ${configuration})"

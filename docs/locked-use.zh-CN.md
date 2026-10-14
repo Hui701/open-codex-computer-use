@@ -6,7 +6,7 @@ Locked Use 可以让 Agent 在 Mac 锁屏时继续操作 GUI。期间所有屏�
 
 ## 如何开启
 
-需要 macOS 14 或更新版本，以及包含 Locked Use 组件的签名 OCU App。自行构建时设置 `OPEN_COMPUTER_USE_INCLUDE_LOCKED_USE=1`。
+需要 macOS 14 或更新版本，以及包含 Locked Use 组件的签名 OCU App。签名的正式构建会默认包含这些组件；自行构建开发版时设置 `OPEN_COMPUTER_USE_INCLUDE_LOCKED_USE=1`。
 
 先正常解锁 Mac，然后运行下面的命令，完成管理员授权：
 

@@ -45,7 +45,7 @@ PLIST
 if [[ "$identity" == "-" ]]; then
   locked_use_sign --force --sign - "$app_path"
 else
-  locked_use_sign --force --options runtime --timestamp --sign "$identity" "$app_path"
+  locked_use_sign --force --options runtime,library --timestamp --sign "$identity" "$app_path"
 fi
 codesign --verify --strict "$app_path"
 printf '%s\n' "$app_path"

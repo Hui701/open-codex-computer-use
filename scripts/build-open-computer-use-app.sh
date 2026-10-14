@@ -219,7 +219,7 @@ codesign_app_bundle() {
   fi
 
   if [[ "${identity}" != "-" ]]; then
-    args+=(--options runtime)
+    args+=(--options runtime,library)
   fi
   if [[ -n "${OPEN_COMPUTER_USE_PROVISIONING_PROFILE:-}" ]]; then
     if [[ "${identity}" == "-" ]]; then

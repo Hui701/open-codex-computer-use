@@ -223,3 +223,5 @@ git push origin :refs/tags/v0.1.14
 如果一次 release 暴露出新的流程坑，就不要只在聊天里记住，直接补进这份文档。
 
 Locked Use 组件签名同样必须在 CI 临时 signing keychain 可搜索的上下文中执行；仅传 codesign --keychain 不能替代现有的临时搜索列表处理。helper 在成功和失败时均恢复列表，scripts/tests/locked-use-signing.test.sh 用模拟 keychain 回归此边界，不触碰真实用户 keychain。
+
+主 App 与 Locked Use 组件显式以 `codesign --options runtime,library` 签名，确保运行时有 `CS_REQUIRE_LV`；仅启用 Hardened Runtime 不能替代进程校验要求的 Library Validation 标志。构建时 kernel verifier 正例必须通过，不能跳过或放宽生产 requirement。

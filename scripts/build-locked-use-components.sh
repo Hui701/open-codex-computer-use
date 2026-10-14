@@ -31,9 +31,9 @@ fi
 mkdir -p "$output"
 locked_use_build_product OCULockService "$output/OCULockService"
 locked_use_build_product OCULockInstaller "$output/OCULockInstaller"
-locked_use_sign --force --options runtime --timestamp --identifier dev.opencomputeruse.locked-use.installer \
+locked_use_sign --force --options runtime,library --timestamp --identifier dev.opencomputeruse.locked-use.installer \
   --sign "$identity" "$output/OCULockInstaller"
-locked_use_sign --force --options runtime --timestamp --identifier dev.opencomputeruse.locked-use.broker \
+locked_use_sign --force --options runtime,library --timestamp --identifier dev.opencomputeruse.locked-use.broker \
   --sign "$identity" "$output/OCULockService"
 team="$(codesign -dv --verbose=4 "$output/OCULockService" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
 if [[ ! "$team" =~ ^[A-Z0-9]{10}$ ]]; then echo 'Developer ID team unavailable.' >&2; exit 1; fi
@@ -77,7 +77,7 @@ cat > "$bundle/Contents/Info.plist" <<PLIST
 <key>CFBundleShortVersionString</key><string>${locked_use_version}</string>
 </dict></plist>
 PLIST
-locked_use_sign --force --options runtime --timestamp --sign "$identity" "$bundle"
+locked_use_sign --force --options runtime,library --timestamp --sign "$identity" "$bundle"
 codesign --verify --strict "$bundle"
 codesign --verify --strict "$output/OCULockService"
 if [[ " ${architectures[*]} " == *" $native_arch "* ]]; then
@@ -95,7 +95,7 @@ xcrun swiftc -parse-as-library -emit-object -target "$native_arch-apple-macos14.
   -o "$test_output/task-verifier-diagnostics.o"
 xcrun swiftc -target "$native_arch-apple-macos14.0" "$test_output/task-verifier-diagnostics.o" "$test_output/task-verifier-tests.o" "$output/plugin-$native_arch/task-verifier.o" \
   -o "$test_output/task-verifier-tests"
-locked_use_sign --force --options runtime --timestamp --identifier dev.opencomputeruse.locked-use.broker \
+locked_use_sign --force --options runtime,library --timestamp --identifier dev.opencomputeruse.locked-use.broker \
   --sign "$identity" "$test_output/task-verifier-tests"
 authority="$(codesign -dv --verbose=4 "$test_output/task-verifier-tests" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)"
 if [[ "$authority" == 'Developer ID Application:'* ]]; then
@@ -106,19 +106,19 @@ fi
 "$test_output/task-verifier-tests" match
 rm -f "$test_output/task-verifier-wrong-id"
 cp "$test_output/task-verifier-tests" "$test_output/task-verifier-wrong-id"
-locked_use_sign --force --options runtime --timestamp --identifier dev.opencomputeruse.locked-use.wrong \
+locked_use_sign --force --options runtime,library --timestamp --identifier dev.opencomputeruse.locked-use.wrong \
   --sign "$identity" "$test_output/task-verifier-wrong-id"
 "$test_output/task-verifier-wrong-id" reject
 rm -f "$test_output/task-verifier-adhoc"
 cp "$test_output/task-verifier-tests" "$test_output/task-verifier-adhoc"
-locked_use_sign --force --options runtime --identifier dev.opencomputeruse.locked-use.broker --sign - "$test_output/task-verifier-adhoc"
+locked_use_sign --force --options runtime,library --identifier dev.opencomputeruse.locked-use.broker --sign - "$test_output/task-verifier-adhoc"
 "$test_output/task-verifier-adhoc" reject
 cat > "$test_output/task-verifier-debug.plist" <<PLIST
 <plist version="1.0"><dict><key>com.apple.security.get-task-allow</key><true/></dict></plist>
 PLIST
 rm -f "$test_output/task-verifier-debug"
 cp "$test_output/task-verifier-tests" "$test_output/task-verifier-debug"
-locked_use_sign --force --options runtime --timestamp --identifier dev.opencomputeruse.locked-use.broker \
+locked_use_sign --force --options runtime,library --timestamp --identifier dev.opencomputeruse.locked-use.broker \
   --entitlements "$test_output/task-verifier-debug.plist" --sign "$identity" "$test_output/task-verifier-debug"
 "$test_output/task-verifier-debug" reject
 else
@@ -143,6 +143,6 @@ cat > "$fixture/Contents/Info.plist" <<PLIST
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
 PLIST
-locked_use_sign --force --options runtime --timestamp --sign "$identity" "$fixture"
+locked_use_sign --force --options runtime,library --timestamp --sign "$identity" "$fixture"
 
 fi

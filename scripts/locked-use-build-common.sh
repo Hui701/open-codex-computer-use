@@ -29,12 +29,32 @@ locked_use_build_product() {
   lipo "$destination" -verify_arch "${architectures[@]}"
 }
 
+locked_use_with_keychain() {
+  local keychain_path="${OPEN_COMPUTER_USE_CODESIGN_KEYCHAIN:-}"
+  if [[ -z "$keychain_path" ]]; then "$@"; return; fi
+  local existing_keychains=() desired_keychains=("$keychain_path") keychain status=0
+  while IFS= read -r keychain; do
+    [[ -z "$keychain" ]] || existing_keychains+=("$keychain")
+  done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//')
+  for keychain in "${existing_keychains[@]}"; do
+    [[ "$keychain" == "$keychain_path" ]] || desired_keychains+=("$keychain")
+  done
+  security list-keychains -d user -s "${desired_keychains[@]}" >/dev/null
+  "$@" || status=$?
+  if [[ "${#existing_keychains[@]}" -gt 0 ]]; then
+    security list-keychains -d user -s "${existing_keychains[@]}" >/dev/null
+  else
+    security list-keychains -d user -s >/dev/null
+  fi
+  return "$status"
+}
+
 locked_use_sign() {
   local args=()
   if [[ -n "${OPEN_COMPUTER_USE_CODESIGN_KEYCHAIN:-}" ]]; then
     args+=(--keychain "$OPEN_COMPUTER_USE_CODESIGN_KEYCHAIN")
   fi
-  /usr/bin/codesign "${args[@]}" "$@"
+  locked_use_with_keychain /usr/bin/codesign "${args[@]}" "$@"
 }
 
 locked_use_version="$(python3 - "$repo_root/plugins/open-computer-use/.codex-plugin/plugin.json" <<'PYVERSION'

@@ -442,21 +442,24 @@ def focus_details(window, text_limit=DEFAULT_TEXT_LIMIT, max_nodes=MAX_ELEMENTS,
     return summary, selection, False
 
 
-def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH):
+def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, include_ax=True, include_screenshot=True):
     app = resolve_app(query)
     window_index, window = main_window(app)
     bounds = extents(window)
-    records, lines = render_tree(
-        window,
-        bounds,
-        [window_index],
-        text_limit=text_limit,
-        max_tree_nodes=max_tree_nodes,
-        max_tree_depth=max_tree_depth,
-    )
-    focus, selection, focus_truncated = focus_details(window, text_limit, max_tree_nodes, max_tree_depth)
-    if focus_truncated:
-        lines.append("[Focus search incomplete: node/depth budget reached.]")
+    records, lines = [], []
+    focus, selection = None, None
+    if include_ax:
+        records, lines = render_tree(
+            window,
+            bounds,
+            [window_index],
+            text_limit=text_limit,
+            max_tree_nodes=max_tree_nodes,
+            max_tree_depth=max_tree_depth,
+        )
+        focus, selection, focus_truncated = focus_details(window, text_limit, max_tree_nodes, max_tree_depth)
+        if focus_truncated:
+            lines.append("[Focus search incomplete: node/depth budget reached.]")
     pid = node_pid(app)
     return {
         "app": {
@@ -466,7 +469,7 @@ def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEM
         },
         "windowTitle": limit_text(node_name(window), text_limit=text_limit),
         "windowBounds": bounds,
-        "screenshotPngBase64": capture_window_png(bounds),
+        "screenshotPngBase64": capture_window_png(bounds) if include_screenshot else None,
         "treeLines": lines,
         "focusedSummary": focus,
         "selectedText": selection,
@@ -803,6 +806,11 @@ def perform_operation(operation):
     if tool == "list_apps":
         return {"ok": True, "text": list_apps_text()}
     if tool == "get_app_state":
+        for key in ("include_ax", "include_screenshot"):
+            if key in operation and not isinstance(operation[key], bool):
+                raise RuntimeError(key + " must be a boolean")
+        if not operation.get("include_ax", True) and not operation.get("include_screenshot", True):
+            raise RuntimeError("At least one of include_ax or include_screenshot must be true")
         return {
             "ok": True,
             "snapshot": build_snapshot(
@@ -810,6 +818,8 @@ def perform_operation(operation):
                 text_limit=parse_text_limit(operation.get("text_limit"), DEFAULT_TEXT_LIMIT),
                 max_tree_nodes=positive_int(operation.get("max_tree_nodes"), MAX_ELEMENTS),
                 max_tree_depth=positive_int(operation.get("max_tree_depth"), MAX_DEPTH),
+                include_ax=operation.get("include_ax", True),
+                include_screenshot=operation.get("include_screenshot", True),
             ),
         }
 

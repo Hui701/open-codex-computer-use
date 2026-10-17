@@ -198,7 +198,7 @@ enum OpenComputerUseSmokeSuite {
         let tools = try client.listTools()
         let expectedTools: Set<String> = [
             "list_apps", "get_app_state", "query", "click", "perform_secondary_action",
-            "scroll", "drag", "type_text", "press_key", "set_value",
+            "scroll", "drag", "type_text", "press_key", "set_value", "select_text",
         ]
         let toolNames = Set(tools.compactMap { $0["name"] as? String })
         guard tools.count == expectedTools.count, toolNames == expectedTools else {
@@ -263,7 +263,16 @@ enum OpenComputerUseSmokeSuite {
         ])
         try expect(state.contains("set-value-ok-typed"), "type_text should append literal text to the focused text field")
 
-        print("8. press_key")
+        print("8. select_text")
+        index = parseElementIndex(state)
+        state = try client.callTool("select_text", arguments: [
+            "app": appName,
+            "element_index": index["fixture-input"]!.index,
+            "text": "value-ok",
+        ])
+        try expect(state.contains("Selected text: [value-ok]"), "select_text should select the requested text inside the text field")
+
+        print("9. press_key")
         index = parseElementIndex(state)
         let keyCaptureFrame = index["fixture-key-capture"]!.frame
         _ = try client.callTool("click", arguments: [
@@ -277,7 +286,7 @@ enum OpenComputerUseSmokeSuite {
         ])
         try expect(state.contains("Last key: Return"), "press_key should update the key capture view")
 
-        print("9. scroll")
+        print("10. scroll")
         index = parseElementIndex(state)
         let scrollIndex = index["fixture-scroll-view"]!.index
         state = try client.callTool("scroll", arguments: [
@@ -288,7 +297,7 @@ enum OpenComputerUseSmokeSuite {
         ])
         try expect(!state.contains("Scroll offset: 0"), "scroll should move the scroll view")
 
-        print("10. drag")
+        print("11. drag")
         index = parseElementIndex(state)
         let dragFrame = index["fixture-drag-pad"]!.frame
         state = try client.callTool("drag", arguments: [

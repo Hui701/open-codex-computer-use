@@ -23,4 +23,8 @@
 - 首次真实滚动测试发现仍无界面偏移：WM_MOUSEWHEEL / WM_MOUSEHWHEEL 的 lParam 必须是屏幕坐标，旧路径却转成客户区坐标。移除转换，并检查 PostMessage 失败；回归同时覆盖请求带 bounds 和正确的屏幕消息坐标。
 - 补 Go 传输与门控测试、PowerShell 生产控制流故障注入测试，以及专用 WPF/Win32/native MCP/Worker JS fixture。继续使用既有 Windows PR 工作流，不使用本地桌面虚拟机。
 
-本地 Go race / vet、PowerShell 故障及观察分支测试通过；真实 hosted Windows 结果待追加。先前作者的 WinUI 3 / 150% 桌面结果保留为原贡献证据，本轮不把 WPF 或正常 DPI 验证当作 WinUI / 多种缩放均已实测。
+验证：Windows Go 32 项、race / vet、amd64 / arm64 构建与 Node 44 项通过。PowerShell 生产函数故障测试在本地 7 和 Windows 5.1 通过，包括中途丢失前台、单个 key-up 失败后继续释放其余键、拖拽中断和旧元素拒绝。
+
+[完整 Windows 实测](https://github.com/iFurySt/open-computer-use/actions/runs/39089480400) 在 `ab214b3` 通过：实际 PostMessage 滚动偏移、真实四向滚轮 / 点击 / 拖拽 / 组合键、app_post 保持、旧窗口与移动 / 移除控件拒绝及 AX 恢复、右侧窗口捕获、Worker JS → MCP → SendInput → WPF。原选择性观察、中文设值和 1×1 / 最小化 / cloaked 截图回归也通过。夹具状态读取允许原子替换所需的共享删除，并有限重试暂态 I/O，修复测试发现的读写竞争；只操作自有临时窗口。
+
+实际 DPI 为 96，物理窗口 640×460；未独立运行 125% / 150%、WinUI 或多显示器。作者此前的 WinUI 3 / 150% 桌面结果保留为另一份证据。文档 / whitespace / 固定 SHA action 检查通过，无版本 bump，不启动本地 Windows VM，未合并 PR。

@@ -222,6 +222,7 @@ Windows returns an unsupported error for `sky_click`; Linux returns an unsupport
 `key_method` on `type_text` and `press_key` is optional. Omitting it uses `auto`, which keeps the existing accessibility-first typing and app-posted key events. Explicit methods never fall back:
 
 - `sky_key`: use the macOS private SkyLight background-window path. It makes the current target window the key window inside its own app (without raising it, moving the pointer, switching Spaces, or deactivating the foreground app), delivers the keys, and releases that state again. Command chords such as `cmd+a`, `cmd+c` or `cmd+v` are performed through the target's own menu bar. Supported on macOS only.
+- `global`: Windows press_key only. Requires `OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1` and sends checked physical keys to the verified foreground target. Auto keys keep window-message delivery even when that flag is enabled. It does not apply to type_text.
 
 Use `sky_key` when a Chromium or Electron window is covered by another window or lives on another Space and `auto` typing does not reach it:
 

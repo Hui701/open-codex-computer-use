@@ -16,10 +16,10 @@ Integrate latest main into the original PR, fix issues found in review, add repe
 ## Progress
 
 - [x] Fetch latest main and original PR, resolve conflicts and adapt tests to the existing service bridge seam.
-- [ ] Review/fix global input, coordinate freshness and cleanup; add focused regression tests.
-- [ ] Add actual Windows scrolling, physical click/drag/key, gate/default/refusal and DPI/capture checks alongside existing observation smoke.
-- [ ] Run Go tests/vet/builds, PowerShell tests, relevant JS checks, documentation checks and hosted desktop CI.
-- [ ] Update docs/history/PR, synchronize remotes, push and report merge readiness.
+- [x] Review/fix global input, coordinate freshness and cleanup; add focused regression tests.
+- [x] Add actual Windows scrolling, physical click/drag/key, gate/default/refusal and DPI/capture checks alongside existing observation smoke.
+- [x] Run Go tests/vet/builds, PowerShell tests, relevant JS checks, documentation checks and hosted desktop CI.
+- [x] Update docs/history/PR, synchronize remotes, push and report merge readiness.
 
 ## Initial findings
 
@@ -32,3 +32,13 @@ First hosted run passed Go, PowerShell and the existing observation smoke. The r
 The corrected real desktop run passed at `6a3c281` (Actions 39088560728), including physical input and Worker JS. Further review adds strict runtime-ID/current-frame checks for indexed physical fallback, with live moved/removed-element refusal and re-observation recovery checks.
 
 The strict-element run passed production input through all four physical wheel directions, then hit a test-state sharing race before the final element cases. Fixture readers now permit atomic rename/delete and retry transient reads; both desktop harnesses share the helper. This is harness I/O, not a product acceptance bypass.
+
+## Outcome
+
+Original contributor commit retained, current main integrated, all reviewed changes pushed to #97. The PR remains open for the maintainer to merge.
+
+- Windows Go 32 tests, local race/vet and amd64/arm64 cross-builds passed. Node 44 passed, including global keyMethod forwarding.
+- Production-function fault tests passed on PowerShell 7 locally and Windows PowerShell 5.1 in CI: gate/focus/hit/geometry refusal, invalid chords, interrupted drag/chord, continued cleanup after one release fails, and foreground loss before the main key.
+- [Full hosted desktop run](https://github.com/iFurySt/open-computer-use/actions/runs/39089480400) passed at `ab214b3`: default PostMessage scrolling, actual physical click/drag/four-way wheel/combination keys, explicit app_post, moved/occluded windows, moved/removed indexed controls, AX recovery, right-edge capture and Worker JS input. Existing selective-observation/Unicode/1x1/minimized/cloaked smoke also passed.
+- Actual fixture DPI was 96, physical window 640x460. Independent 125%/150%, WinUI and multiple-monitor acceptance were not run; the original contributor's Windows 11/WinUI 3/150% results remain separate evidence.
+- Docs, whitespace and action pinning checks passed. No version bump, local desktop VM or PR merge. Automatic observation/image-dedup behavior was not changed.

@@ -67,7 +67,11 @@ public final class ComputerUseToolDispatcher {
                     maxNodeCount: try optionalPositiveInt("max_tree_nodes", in: arguments),
                     maxDepth: try optionalPositiveInt("max_tree_depth", in: arguments)
                 ),
-                windowPlacement: try parseWindowPlacement(optionalString("window_placement", in: arguments))
+                windowPlacement: try parseWindowPlacement(optionalString("window_placement", in: arguments)),
+                observation: SnapshotObservationOptions(
+                    includeAX: try strictObservationBool("include_ax", in: arguments),
+                    includeScreenshot: try strictObservationBool("include_screenshot", in: arguments)
+                )
             )
         case "click":
             return try service.click(
@@ -118,6 +122,15 @@ public final class ComputerUseToolDispatcher {
                 elementIndex: requireElementIndex(in: arguments),
                 value: requireString("value", in: arguments)
             )
+        case "select_text":
+            return try service.selectText(
+                app: requireString("app", in: arguments),
+                elementIndex: requireElementIndex(in: arguments),
+                text: requireString("text", in: arguments),
+                prefix: try selectionString("prefix", in: arguments),
+                suffix: try selectionString("suffix", in: arguments),
+                selection: try parseSelectionMode(try selectionString("selection", in: arguments))
+            )
         default:
             throw ComputerUseError.unsupportedTool(name)
         }
@@ -145,6 +158,14 @@ public final class ComputerUseToolDispatcher {
         return value
     }
 
+    private func strictObservationBool(_ key: String, in arguments: [String: Any]) throws -> Bool {
+        guard let value = arguments[key] else { return true }
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            throw ComputerUseError.invalidArguments("\(key) must be a boolean")
+        }
+        return number.boolValue
+    }
+
     private func optionalBool(_ key: String, in arguments: [String: Any]) -> Bool? {
         switch arguments[key] {
         case let value as Bool: return value
@@ -165,6 +186,26 @@ public final class ComputerUseToolDispatcher {
 
     private func optionalString(_ key: String, in arguments: [String: Any]) -> String? {
         arguments[key] as? String
+    }
+
+    private func selectionString(_ key: String, in arguments: [String: Any]) throws -> String? {
+        guard let value = arguments[key] else { return nil }
+        guard let string = value as? String else {
+            throw ComputerUseError.invalidArguments("\(key) must be a string")
+        }
+        return string
+    }
+
+    private func parseSelectionMode(_ raw: String?) throws -> TextSelectionMode {
+        guard let raw else { return .text }
+
+        guard let mode = TextSelectionMode(rawValue: raw) else {
+            throw ComputerUseError.message(
+                "selection must be one of \(TextSelectionMode.allCases.map(\.rawValue).joined(separator: ", "))"
+            )
+        }
+
+        return mode
     }
 
     private func optionalTextLimit(_ key: String, in arguments: [String: Any]) throws -> SnapshotTextLimit? {

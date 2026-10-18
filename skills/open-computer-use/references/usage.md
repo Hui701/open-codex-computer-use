@@ -39,6 +39,7 @@ drag
 type_text
 press_key
 set_value
+select_text   (macOS runtime only)
 ```
 
 macOS also exposes `query` for targeted AX lookup. These nine core tools remain the cross-platform compatibility surface. The bundled Codex plugin uses a
@@ -50,6 +51,33 @@ var app = await cua.getApp("TextEdit");
 await app.typeText("Hello");
 await app.getAXState();
 ```
+
+### Selective observation (opt-in)
+
+The native `get_app_state` tool on macOS, Windows and Linux accepts `include_ax` and
+`include_screenshot`. Both default to `true`; at least one must remain true.
+The REPL forwards the corresponding optional `includeAX` / `includeScreenshot`
+booleans:
+
+```js
+var editor = await cua.getApp("gedit", { initialState: false });
+await editor.getScreenshot({ includeAX: false }); // no AX, focus or selection walk
+await editor.click([100, 100]);                   // window-relative coordinates
+await editor.getAXState({ includeScreenshot: false }); // no capture or PNG encoding
+// Use newly observed element indexes only after inspecting the AX result.
+```
+
+Screenshot-only observation invalidates prior element indexes and cached query
+aliases for that app, even if the window title is unchanged. Its result explicitly
+reports this. Coordinate actions use the newly observed window bounds; element
+actions require a fresh AX observation. Existing calls without these options keep
+their full native observation behavior. These flags are implemented on all three native platforms; action read-back is unchanged.
+
+These options select collection, not image deduplication. An unchanged screenshot
+is still returned when requested. macOS/Linux JS actions already disable automatic
+read-back, and getAXState does not emit images; includeScreenshot:false additionally skips
+native capture on all three platforms. See `docs/selective-observation.md` for real GTK
+and Worker JS validation.
 
 The code-first surface also forwards macOS background-operation options:
 
@@ -227,6 +255,39 @@ open-computer-use call --calls '[
 Every non-fixture `drag` result includes a text item that begins `Drag delivered via app_post` or `Drag delivered via global pointer path`, so a default drag that did nothing is legible instead of looking like success. For an MCP server the variable belongs in the server entry's `env`, not in the calling shell, and the server must be restarted afterwards.
 
 When the gate is not enabled, treat window-server drags as unavailable and reach the same outcome another way: copy or move files with a shell command instead of a Finder drag, use `set_value` or keyboard selection instead of drag-selecting text, and use the app's own window controls instead of dragging a title bar.
+
+## Text Selection (macOS)
+
+Use `await app.selectText(elementIndex, text, options?)` with a snapshot or `query`
+index from the current session. The native CLI/MCP tool is `select_text`.
+
+| Argument | Meaning |
+| --- | --- |
+| `elementIndex` | The text element's current index. |
+| `text` | Exact target text, including whitespace and Unicode spelling. |
+| `options.prefix` / `options.suffix` | Text immediately before / after the target, for repeated matches. |
+| `options.selection` | `text` (default), `cursor_before` or `cursor_after`. |
+
+Ambiguous or missing text, unsupported selection, text changes and unverified ranges
+return errors. The action verifies the applied UTF-16 range even when full action
+read-back is off; use `getAXState()` for the next UI observation. It does not activate
+the app or fall back to keyboard/pointer input. Linux and Windows do not implement
+`select_text` yet.
+
+## Software Cursor
+
+The software cursor keeps a window-relative anchor for its target point. During travel, settle, click
+feedback and idle, it follows changes to the target window's frame. If the window moves during travel,
+the visible tip lands at the new position immediately, without continuing toward the old position.
+
+Window frames are read on a background worker at up to 30 Hz, with at most one read in flight. Rendering
+uses the latest cached frame, so a slow Accessibility response does not block the cursor. The snapshot's
+AX window element is preferred; `CGWindowListCopyWindowInfo` is used only when no AX element is available,
+because it can report an old origin after a move. A failed read keeps the last usable frame. Tracking is
+released when the cursor is cleared or its idle timeout expires.
+
+This follows the window's position, not layout changes inside it. Refresh app state after a layout change
+before choosing another target. Input delivery continues to use the existing action paths.
 
 ## Platform Notes
 

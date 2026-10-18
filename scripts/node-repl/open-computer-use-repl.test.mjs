@@ -102,6 +102,42 @@ test("app-bound API composes actions and state in one js call", async () => {
   assert.ok(result.content.some(item => item.type === "text" && item.text === "state:Text"));
 });
 
+for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
+  test(`${Session.name}: selective observation is explicit and legacy calls keep their arguments`, async t => {
+    const native = mockNative();
+    const session = new Session({ native });
+    t.after(() => session.close?.());
+    const result = await session.run(`
+      var selectiveApp = await cua.getApp("Text", { initialState: false });
+      await selectiveApp.getScreenshot({ includeAX: false, emit: false });
+      await selectiveApp.getAXState({ includeScreenshot: false, emit: false });
+      await selectiveApp.getScreenshot({ emit: false });
+      await selectiveApp.getAXState({ emit: false });
+    `);
+    assert.equal(result.isError, false);
+    assert.deepEqual(native.calls.map(call => call.arguments), [
+      { app: "Text", include_ax: false, text_limit: 1 },
+      { app: "Text", include_screenshot: false },
+      { app: "Text", text_limit: 1 },
+      { app: "Text" },
+    ]);
+    const count = native.calls.length;
+    for (const code of [
+      'await selectiveApp.getScreenshot({ includeAX: "false" })',
+      'await selectiveApp.getAXState({ includeScreenshot: null })',
+    ]) {
+      const invalid = await session.run(code);
+      assert.equal(invalid.isError, true);
+      assert.match(invalid.content.at(-1).text, /must be a boolean/);
+    }
+    assert.equal(native.calls.length, count);
+    const empty = await session.run('await selectiveApp.getAXStateAndScreenshot({ includeAX: false, includeScreenshot: false })');
+    assert.equal(empty.isError, true);
+    assert.match(empty.content.at(-1).text, /At least one/);
+    assert.equal(native.calls.length, count);
+  });
+}
+
 test("app-bound API forwards background-operation options", async () => {
   const native = mockNative();
   const session = new PersistentJavaScriptSession({ native });
@@ -246,6 +282,68 @@ test("worker session serializes concurrent callers", async () => {
   await session.close();
 });
 
+test("native session end rejects pending work and initializes a fresh child without replay", async () => {
+  const source = `
+    let buffer = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => {
+      buffer += chunk;
+      for (;;) {
+        const end = buffer.indexOf('\\n'); if (end < 0) break;
+        const request = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+        if (request.id === undefined || request.method === 'stall') continue;
+        process.stdout.write(JSON.stringify({jsonrpc:'2.0', id:request.id, result:{pid:process.pid}}) + '\\n');
+      }
+    });
+  `;
+  const peer = new JsonLinePeer({ command: process.execPath, args: ["--input-type=module", "-e", source] });
+  try {
+    const first = await peer.initialize();
+    const old = peer.child;
+    const pending = peer.request("stall", {}, 5_000);
+    const rejected = assert.rejects(pending, /session ended/);
+    peer.endSession();
+    await rejected;
+    const next = await peer.request("ping", {}, 5_000);
+    assert.notEqual(next.pid, first.pid);
+    old.emit("exit", 1, null);
+    assert.equal(peer.closed, false);
+    await assert.rejects(peer.request("stall", {}, 20), /timed out/);
+    assert.equal(peer.closed, true);
+    const recovered = await peer.request("ping", {}, 5_000);
+    assert.notEqual(recovered.pid, next.pid);
+  } finally { peer.close(); }
+});
+
+test("worker reset and timeout end the native GUI lease", async () => {
+  const native = mockNative();
+  let ended = 0;
+  native.endSession = () => { ended += 1; };
+  const session = new WorkerJavaScriptSession({ native });
+  try {
+    await session.reset();
+    assert.equal(ended, 1);
+    const result = await session.run("while (true) {}", 100);
+    assert.equal(result.isError, true);
+    assert.equal(ended, 2);
+  } finally { await session.close(); }
+});
+
+
+test("reset drops old worker native requests before a replacement kernel starts", async () => {
+  const native = mockNative();
+  const session = new WorkerJavaScriptSession({ native });
+  try {
+    const old = session.worker;
+    const resetting = session.reset();
+    old.emit("message", { type: "native_request", id: 1, method: "tools/call", params: { name: "click", arguments: {} } });
+    await resetting;
+    assert.equal(native.calls.length, 0);
+    old.emit("message", { type: "native_request", id: 2, method: "tools/call", params: { name: "click", arguments: {} } });
+    assert.equal(native.calls.length, 0);
+  } finally { await session.close(); }
+});
+
 test("lightweight app binding queries and acts across persistent JS calls without a snapshot", async () => {
   const native = mockNative();
   const request = native.request;
@@ -290,3 +388,43 @@ test("query returns truncation metadata and rejects malformed native responses",
   assert.equal(bad.isError, true);
   assert.match(bad.content.at(-1).text, /Invalid query response/);
 });
+
+
+for (const Session of [PersistentJavaScriptSession, WorkerJavaScriptSession]) {
+  test(`${Session.name}: selectText forwards all selection modes without a snapshot`, async t => {
+    const native = mockNative(), session = new Session({ native });
+    t.after(() => session.close?.());
+    let result = await session.run(`var selectionApp = await cua.getApp("Text", { initialState: false }); await selectionApp.selectText(1000001, "中文🙂", {prefix: "before ", suffix: " after"});`);
+    assert.equal(result.isError, false, result.content.at(-1).text);
+    assert.deepEqual(native.calls[0], { name: "select_text", arguments: { app: "Text", element_index: 1000001, text: "中文🙂", prefix: "before ", suffix: " after", selection: undefined } });
+    for (const mode of ["text", "cursor_before", "cursor_after"]) {
+      result = await session.run(`await selectionApp.selectText("5", "target", {selection: "${mode}"});`);
+      assert.equal(result.isError, false, result.content.at(-1).text);
+      assert.equal(native.calls.at(-1).arguments.selection, mode);
+    }
+    assert.equal(native.calls.some(call => call.name === "get_app_state"), false);
+  });
+
+  test(`${Session.name}: selectText rejects invalid inputs before native calls`, async t => {
+    const native = mockNative(), session = new Session({ native });
+    t.after(() => session.close?.());
+    await session.run(`var selectionApp = await cua.getApp("Text", { initialState: false });`);
+    for (const args of [`-1,"x"`, `1.5,"x"`, `true,"x"`, `"bad","x"`, `[],"x"`, `0,""`, `0,3`, `0,"x",null`, `0,"x",[]`, `0,"x",{prefix:2}`, `0,"x",{suffix:null}`, `0,"x",{selection:"after"}`, `0,"x",{selection:""}`, `0,"x",{typo:true}`]) {
+      const result = await session.run(`await selectionApp.selectText(${args});`);
+      assert.equal(result.isError, true, args);
+    }
+    assert.equal(native.calls.length, 0);
+  });
+
+  test(`${Session.name}: selectText preserves native verification and platform failures`, async t => {
+    const native = mockNative(), session = new Session({ native });
+    t.after(() => session.close?.());
+    await session.run(`var selectionApp = await cua.getApp("Text", { initialState: false });`);
+    for (const message of ["select_text could not verify the requested range", 'unsupportedTool("select_text")']) {
+      native.request = async () => textResult(message, true);
+      const result = await session.run(`await selectionApp.selectText(0,"target");`);
+      assert.equal(result.isError, true);
+      assert.ok(result.content.at(-1).text.includes(message), result.content.at(-1).text);
+    }
+  });
+}

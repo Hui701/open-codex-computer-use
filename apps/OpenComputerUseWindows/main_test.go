@@ -76,12 +76,10 @@ func TestScrollRequestIncludesWindowBounds(t *testing.T) {
 	}
 
 	var captured psRequest
-	original := runPowerShellRequest
-	runPowerShellRequest = func(request psRequest) (*psResponse, error) {
+	svc.runBridge = func(request psRequest) (*psResponse, error) {
 		captured = request
 		return &psResponse{OK: true, Snapshot: &appSnapshot{App: appDescriptor{Name: "fixture", PID: 42}}}, nil
 	}
-	defer func() { runPowerShellRequest = original }()
 
 	result := svc.scroll("fixture", "down", "0", 1)
 	if result.IsError {

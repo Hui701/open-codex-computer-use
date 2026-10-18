@@ -94,6 +94,8 @@ public enum ToolDefinitions {
             annotations: defaultAnnotations(),
             inputSchema: objectSchema(
                 properties: [
+                    "include_ax": ["type": "boolean", "default": true, "description": "Include accessibility tree, focus and selection. False skips collection and invalidates previous element indexes; read AX again before element actions."],
+                    "include_screenshot": ["type": "boolean", "default": true, "description": "Capture and return a screenshot. False skips capture and encoding; screenshot-coordinate actions require a fresh screenshot."],
                     "app": stringProperty(description: "App name or bundle identifier"),
                     "text_limit": textLimitProperty(description: "Maximum text characters to return. Use \"max\" for full text. Defaults to 500."),
                     "max_tree_nodes": positiveIntegerProperty(description: "Maximum accessibility tree nodes to render. Defaults to 1200."),
@@ -163,6 +165,25 @@ public enum ToolDefinitions {
                     "value": stringProperty(description: "Value to assign"),
                 ],
                 required: ["app", "element_index", "value"]
+            )
+        ),
+        ToolDefinition(
+            name: "select_text",
+            description: "Select text inside a text element, or place the text cursor before or after it. Provide text exactly as it appears in the accessibility tree, including any Markdown formatting. If the text is not unique, provide surrounding prefix or suffix text to disambiguate it. This tool is part of plugin `Computer Use`.",
+            annotations: defaultAnnotations(),
+            inputSchema: objectSchema(
+                properties: [
+                    "app": stringProperty(description: "App name or bundle identifier"),
+                    "element_index": stringProperty(description: "Text element identifier"),
+                    "text": stringProperty(description: "Target text as shown in the accessibility tree"),
+                    "prefix": stringProperty(description: "Optional text immediately before the target, used to disambiguate repeated matches"),
+                    "suffix": stringProperty(description: "Optional text immediately after the target, used to disambiguate repeated matches"),
+                    "selection": stringProperty(
+                        description: "Whether to select the text or place the cursor before or after it. Defaults to text.",
+                        enumValues: TextSelectionMode.allCases.map(\.rawValue)
+                    ),
+                ],
+                required: ["app", "element_index", "text"]
             )
         ),
         ToolDefinition(

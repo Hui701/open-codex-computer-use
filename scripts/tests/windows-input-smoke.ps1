@@ -1,5 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$NativePath)
 $ErrorActionPreference="Stop"
+. (Join-Path $PSScriptRoot "windows-fixture-state.ps1")
 if($env:OS -ne "Windows_NT"){throw "Windows desktop required"}
 $NativePath=(Resolve-Path -LiteralPath $NativePath).Path
 Add-Type -AssemblyName System.Drawing
@@ -21,10 +22,10 @@ function Assert($condition,$message){if(-not $condition){throw $message}}
 function Wait-For($test,$description){
  $deadline=[DateTime]::UtcNow.AddSeconds(15)
  do {try{if(& $test){return}}catch{};Start-Sleep -Milliseconds 50}while([DateTime]::UtcNow -lt $deadline)
- $details=if(Test-Path -LiteralPath $stateFile){[IO.File]::ReadAllText($stateFile)}else{"no fixture state"}
+ try {$details=(State)|ConvertTo-Json -Compress} catch {$details="fixture state unavailable"}
  throw "Timeout: $description; fixture=$details"
 }
-function State {[IO.File]::ReadAllText($stateFile)|ConvertFrom-Json}
+function State {Read-WindowsFixtureState $stateFile}
 function Command($kind){
  $script:sequence++
  [IO.File]::WriteAllText(($stateFile+".command"),(@{sequence=$script:sequence;kind=$kind}|ConvertTo-Json -Compress),[Text.Encoding]::UTF8)

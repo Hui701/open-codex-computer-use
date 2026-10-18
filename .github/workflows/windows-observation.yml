@@ -6,6 +6,7 @@ on:
       - 'apps/OpenComputerUseWindows/**'
       - 'scripts/tests/windows-observation*'
       - 'scripts/tests/windows-input*'
+      - 'scripts/tests/windows-fixture-state.ps1'
       - 'scripts/tests/fixtures/WindowsInputFixture.ps1'
       - 'scripts/tests/fixtures/WindowsObservationFixture.ps1'
       - '.github/workflows/windows-observation.yml'

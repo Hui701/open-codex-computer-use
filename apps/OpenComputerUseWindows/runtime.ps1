@@ -360,6 +360,8 @@ function Send-GlobalMouseMove([IntPtr]$hwnd, [int]$x, [int]$y, $bounds, [bool]$A
 }
 
 function Send-GlobalMouseClick([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$button, [int]$count, $bounds) {
+    if ($button -notin @("left", "right", "middle")) { throw "Unsupported global mouse button: $button" }
+    if ($count -lt 1 -or $count -gt 3) { throw "Global click_count must be between 1 and 3." }
     $down = $MOUSEEVENTF_LEFTDOWN; $up = $MOUSEEVENTF_LEFTUP; $virtualKey = 1
     if ($button -eq "right") { $down = $MOUSEEVENTF_RIGHTDOWN; $up = $MOUSEEVENTF_RIGHTUP; $virtualKey = 2 }
     elseif ($button -eq "middle") { $down = $MOUSEEVENTF_MIDDLEDOWN; $up = $MOUSEEVENTF_MIDDLEUP; $virtualKey = 4 }
@@ -455,11 +457,8 @@ function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direc
         Start-Sleep -Milliseconds 120
         return
     }
-    $point = New-Object OCUWin32+POINT
-    $point.X = $screenX
-    $point.Y = $screenY
-    [void][OCUWin32]::ScreenToClient($hwnd, [ref]$point)
-    $lParam = ConvertTo-LParam $point.X $point.Y
+    # WM_MOUSEWHEEL / WM_MOUSEHWHEEL carry screen coordinates, unlike clicks.
+    $lParam = ConvertTo-LParam $screenX $screenY
     $delta = [int][math]::Round(120 * $pages)
     $message = $WM_MOUSEWHEEL
     if ($direction -eq "down" -or $direction -eq "left") {
@@ -468,7 +467,9 @@ function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direc
     if ($direction -eq "left" -or $direction -eq "right") {
         $message = $WM_MOUSEHWHEEL
     }
-    [void][OCUWin32]::PostMessage($hwnd, $message, (ConvertTo-WheelWParam $delta), $lParam)
+    if (-not [OCUWin32]::PostMessage($hwnd, $message, (ConvertTo-WheelWParam $delta), $lParam)) {
+        throw "PostMessage wheel delivery failed."
+    }
 }
 
 function Send-Text([IntPtr]$hwnd, [string]$text) {

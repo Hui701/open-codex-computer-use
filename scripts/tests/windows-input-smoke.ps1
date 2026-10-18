@@ -21,7 +21,8 @@ function Assert($condition,$message){if(-not $condition){throw $message}}
 function Wait-For($test,$description){
  $deadline=[DateTime]::UtcNow.AddSeconds(15)
  do {try{if(& $test){return}}catch{};Start-Sleep -Milliseconds 50}while([DateTime]::UtcNow -lt $deadline)
- throw "Timeout: $description"
+ $details=if(Test-Path -LiteralPath $stateFile){[IO.File]::ReadAllText($stateFile)}else{"no fixture state"}
+ throw "Timeout: $description; fixture=$details"
 }
 function State {[IO.File]::ReadAllText($stateFile)|ConvertFrom-Json}
 function Command($kind){

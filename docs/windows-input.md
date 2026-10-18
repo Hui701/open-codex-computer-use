@@ -1,6 +1,6 @@
 # Windows 输入
 
-默认使用 UI Automation 和窗口消息。需要真实鼠标 / 按键时，在启动 OCU 的进程环境中设置：
+默认使用 UI Automation 和窗口消息。滚动回退保留窗口 bounds，并按滚轮消息要求传递屏幕坐标；DPI bridge 使用物理像素。需要真实鼠标 / 按键时，在启动 OCU 的进程环境中设置：
 
 ```powershell
 $env:OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS="1"
@@ -20,7 +20,7 @@ $env:OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS="1"
 
 真实输入会移动系统指针，可能将目标放到前台。发送前核对已观察的进程 / 窗口、当前几何、前台及坐标命中窗口。窗口移动、被其他窗口遮挡或无法切换前台时会报错，需要重新观察或让目标可见。不会模拟 Alt 强行抢前台，也不会在指定 app_post / accessibility 失败时切到真实输入。
 
-按键 / 鼠标用 SendInput，并检查是否插入成功。组合键先完整校验，再按下；异常时释放本次按下的键 / 按钮。系统完整性级别限制仍适用；进程强制终止也不能保证执行 finally。
+按键 / 鼠标用 SendInput，并检查是否插入成功。真实鼠标支持左 / 中 / 右键及 1–3 次点击，拒绝无效按钮和过大的点击次数。组合键先完整校验，再按下；异常时释放本次按下的键 / 按钮。系统完整性级别限制仍适用；进程强制终止也不能保证执行 finally。
 
 ## 验证
 
@@ -35,4 +35,4 @@ pwsh -File scripts/tests/windows-input-smoke.ps1 -NativePath "$env:TEMP/ocu-inpu
 
 脚本记录实际窗口 DPI，并比较截图尺寸与独立物理窗口矩形。正常 DPI 的通过不能替代 125% / 150% / 多显示器实测。原有正常 / 1×1 / 最小化 / cloaked 截图检查也在同一 Windows PR 工作流运行。
 
-实现依据：[SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)、[SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)、[线程 DPI 上下文](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext)。
+实现依据：[滚轮消息屏幕坐标](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mousewheel)、[横向滚轮方向](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mousehwheel)、[SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)、[SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)、[线程 DPI 上下文](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext)。

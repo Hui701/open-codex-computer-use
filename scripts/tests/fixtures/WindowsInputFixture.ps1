@@ -64,9 +64,12 @@ $cover=@{window=$null}
 $hook=[System.Windows.Interop.HwndSourceHook]{
  param($hwnd,$message,$wParam,$lParam,[ref]$handled)
  if($message -eq 0x20a -or $message -eq 0x20e) {
+  $state.rawWheelMessages=[int]$state.rawWheelMessages+1
   $packed=$lParam.ToInt64(); $sx=[int]($packed -band 0xffff); $sy=[int](($packed -shr 16) -band 0xffff)
   if($sx -ge 32768){$sx-=65536}; if($sy -ge 32768){$sy-=65536}
   $point=$scroll.PointFromScreen((New-Object System.Windows.Point($sx,$sy)))
+  $state.lastWheelScreenX=$sx; $state.lastWheelScreenY=$sy
+  $state.lastWheelLocalX=$point.X; $state.lastWheelLocalY=$point.Y
   if($point.X -ge 0 -and $point.Y -ge 0 -and $point.X -lt $scroll.ActualWidth -and $point.Y -lt $scroll.ActualHeight) {
    $delta=[int](($wParam.ToInt64() -shr 16) -band 0xffff); if($delta -ge 32768){$delta-=65536}
    if($message -eq 0x20a){$state.wheelMessages++;$scroll.ScrollToVerticalOffset($scroll.VerticalOffset-$delta/120*30)}
@@ -84,6 +87,7 @@ $encoding=New-Object System.Text.UTF8Encoding($false)
 $timer=New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval=[TimeSpan]::FromMilliseconds(50)
 $timer.Add_Tick({
+ if(-not $window.IsLoaded){return}
  $hwnd=(New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle
  $commandPath=$StatePath+".command"
  if(Test-Path -LiteralPath $commandPath) {

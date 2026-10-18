@@ -24,3 +24,7 @@ Integrate latest main into the original PR, fix issues found in review, add repe
 ## Initial findings
 
 Main is `31a7d7d` (#101). The original PR adds a second process-global bridge test seam, now superseded by service.runBridge. Global drag/scroll ignore focus failure; global click does not confirm its target; key validation occurs after modifier downs and has no finally cleanup. The global-key branch changes every auto press_key when the pointer gate is enabled. Keep auto on window messages and expose real keys through explicit Windows key_method=global. These require fixes before merge.
+
+## Desktop findings
+
+First hosted run passed Go, PowerShell and the existing observation smoke. The real default scroll test exposed a second coordinate bug: WM_MOUSEWHEEL/HWHEEL lParam was incorrectly converted to client coordinates. Preserve screen coordinates and report PostMessage failure, then rerun the actual scroll-offset check.

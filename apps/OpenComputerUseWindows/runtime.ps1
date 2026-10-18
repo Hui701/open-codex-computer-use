@@ -77,10 +77,53 @@ public static class OCUWin32 {
     public static extern bool GetCursorPos(out POINT point);
 
     [DllImport("user32.dll")]
-    public static extern void mouse_event(uint flags, int dx, int dy, int data, IntPtr extraInfo);
-
+    public static extern IntPtr WindowFromPoint(POINT point);
     [DllImport("user32.dll")]
-    public static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, IntPtr extraInfo);
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetThreadDpiAwarenessContext();
+    [DllImport("user32.dll")]
+    public static extern int GetAwarenessFromDpiAwarenessContext(IntPtr context);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT {
+        public int dx, dy;
+        public uint mouseData, flags, time;
+        public UIntPtr extra;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT {
+        public ushort key, scan;
+        public uint flags, time;
+        public UIntPtr extra;
+    }
+    [StructLayout(LayoutKind.Explicit)]
+    public struct INPUTUNION {
+        [FieldOffset(0)] public MOUSEINPUT mouse;
+        [FieldOffset(0)] public KEYBDINPUT keyboard;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT { public uint type; public INPUTUNION data; }
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint count, INPUT[] inputs, int size);
+    private static void Send(INPUT input) {
+        if (SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT))) != 1)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "SendInput failed (possibly blocked by desktop/integrity restrictions)");
+    }
+    public static void MouseInput(uint flags, int data) {
+        INPUT input = new INPUT();
+        input.data.mouse.flags = flags;
+        input.data.mouse.mouseData = unchecked((uint)data);
+        Send(input);
+    }
+    public static void KeyInput(int key, bool up) {
+        INPUT input = new INPUT(); input.type = 1;
+        input.data.keyboard.key = (ushort)key;
+        input.data.keyboard.flags = (up ? 2u : 0u) | ((key >= 0x21 && key <= 0x2e) ? 1u : 0u);
+        Send(input);
+    }
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
@@ -113,20 +156,18 @@ $EM_REPLACESEL = 0x00C2
 # virtualized screen and shifts every screenshot coordinate, so pin the process to
 # the physical coordinate space before any bounds check runs.
 $DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = [IntPtr](-4)
-try {
-    [void][OCUWin32]::SetProcessDpiAwarenessContext($DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-} catch {
-}
-try {
-    [void][OCUWin32]::SetThreadDpiAwarenessContext($DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-} catch {
+try { [void][OCUWin32]::SetProcessDpiAwarenessContext($DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) } catch { }
+# The host may already have selected process awareness. A thread override must
+# succeed; silently using virtualized coordinates can target another location.
+$previousDpi = [OCUWin32]::SetThreadDpiAwarenessContext($DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+if ($previousDpi -eq [IntPtr]::Zero -or
+    [OCUWin32]::GetAwarenessFromDpiAwarenessContext([OCUWin32]::GetThreadDpiAwarenessContext()) -ne 2) {
+    throw "Cannot establish per-monitor physical coordinates for the Windows bridge."
 }
 
 # Real system input is a deliberate opt-in: it moves the user's pointer and can
 # change foreground focus, so the default Windows path stays on UIA patterns and
 # Win32 window messages.
-$VK_MENU = 0x12
-$KEYEVENTF_KEYUP = 0x0002
 $MOUSEEVENTF_LEFTDOWN = 0x0002
 $MOUSEEVENTF_LEFTUP = 0x0004
 $MOUSEEVENTF_RIGHTDOWN = 0x0008
@@ -276,39 +317,60 @@ function Test-GlobalPointerFallbackEnabled {
     return (Test-EnvFlagEnabled "OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS")
 }
 
-function Invoke-GlobalInputFocus([IntPtr]$hwnd) {
-    if ([OCUWin32]::GetForegroundWindow() -eq $hwnd) {
-        return $true
+function Assert-GlobalInputTarget([IntPtr]$hwnd, [bool]$AllowActivation = $true) {
+    if (-not (Test-GlobalPointerFallbackEnabled)) { throw "Global input requires OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1" }
+    if ($null -eq (Get-CapturableWindowFrame $hwnd)) { throw "Global input requires a visible, usable target window. Run get_app_state again." }
+    if ([OCUWin32]::GetForegroundWindow() -ne $hwnd -and $AllowActivation) {
+        [void][OCUWin32]::SetForegroundWindow($hwnd)
+        Start-Sleep -Milliseconds 100
     }
-    # SetForegroundWindow is refused while another process owns the foreground; a
-    # synthetic Alt tap releases that lock for the calling process.
-    [OCUWin32]::keybd_event($VK_MENU, 0, 0, [IntPtr]::Zero)
-    [OCUWin32]::keybd_event($VK_MENU, 0, $KEYEVENTF_KEYUP, [IntPtr]::Zero)
-    [void][OCUWin32]::SetForegroundWindow($hwnd)
-    Start-Sleep -Milliseconds 250
-    return ([OCUWin32]::GetForegroundWindow() -eq $hwnd)
+    if ([OCUWin32]::GetForegroundWindow() -ne $hwnd) {
+        throw "Global input refused: target window is not foreground. Activate the target and observe it again."
+    }
 }
 
-function Send-GlobalMouseMove([int]$screenX, [int]$screenY, [int]$settleMilliseconds = 60) {
-    [void][OCUWin32]::SetCursorPos($screenX, $screenY)
-    Start-Sleep -Milliseconds $settleMilliseconds
+function Assert-CurrentWindowBounds([IntPtr]$hwnd, $expected) {
+    Assert-UsableWindowBounds $expected
+    $current = Get-CapturableWindowFrame $hwnd
+    foreach ($field in @("x", "y", "width", "height")) {
+        if ($null -eq $current -or [double]$current.$field -ne [double]$expected.$field) {
+            throw "Window geometry changed; run get_app_state before coordinate input."
+        }
+    }
 }
 
-function Send-GlobalMouseClick([int]$screenX, [int]$screenY, [string]$button, [int]$count) {
-    $down = $MOUSEEVENTF_LEFTDOWN
-    $up = $MOUSEEVENTF_LEFTUP
-    if ($button -eq "right") {
-        $down = $MOUSEEVENTF_RIGHTDOWN
-        $up = $MOUSEEVENTF_RIGHTUP
-    } elseif ($button -eq "middle") {
-        $down = $MOUSEEVENTF_MIDDLEDOWN
-        $up = $MOUSEEVENTF_MIDDLEUP
+function Assert-GlobalPointerTarget([IntPtr]$hwnd, [int]$x, [int]$y, $bounds, [bool]$AllowActivation = $true) {
+    Assert-CurrentWindowBounds $hwnd $bounds
+    if ($x -lt $bounds.x -or $y -lt $bounds.y -or $x -ge ($bounds.x + $bounds.width) -or $y -ge ($bounds.y + $bounds.height)) {
+        throw "Global input point is outside the observed target window."
     }
-    Send-GlobalMouseMove $screenX $screenY
+    Assert-GlobalInputTarget $hwnd $AllowActivation
+    $point = New-Object OCUWin32+POINT
+    $point.X = $x; $point.Y = $y
+    $hit = [OCUWin32]::WindowFromPoint($point)
+    if ($hit -eq [IntPtr]::Zero -or [OCUWin32]::GetAncestor($hit, 2) -ne $hwnd) {
+        throw "Global input refused: point is covered by another window."
+    }
+}
+
+function Send-GlobalMouseMove([IntPtr]$hwnd, [int]$x, [int]$y, $bounds, [bool]$AllowActivation = $true) {
+    Assert-GlobalPointerTarget $hwnd $x $y $bounds $AllowActivation
+    if (-not [OCUWin32]::SetCursorPos($x, $y)) { throw "SetCursorPos failed" }
+    Assert-GlobalPointerTarget $hwnd $x $y $bounds $false
+}
+
+function Send-GlobalMouseClick([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$button, [int]$count, $bounds) {
+    $down = $MOUSEEVENTF_LEFTDOWN; $up = $MOUSEEVENTF_LEFTUP; $virtualKey = 1
+    if ($button -eq "right") { $down = $MOUSEEVENTF_RIGHTDOWN; $up = $MOUSEEVENTF_RIGHTUP; $virtualKey = 2 }
+    elseif ($button -eq "middle") { $down = $MOUSEEVENTF_MIDDLEDOWN; $up = $MOUSEEVENTF_MIDDLEUP; $virtualKey = 4 }
+    if ([OCUWin32]::GetAsyncKeyState($virtualKey) -lt 0) { throw "Mouse button is already held; global input refused." }
+    Send-GlobalMouseMove $hwnd $screenX $screenY $bounds
     for ($i = 0; $i -lt [math]::Max(1, $count); $i++) {
-        [OCUWin32]::mouse_event($down, 0, 0, 0, [IntPtr]::Zero)
-        Start-Sleep -Milliseconds 30
-        [OCUWin32]::mouse_event($up, 0, 0, 0, [IntPtr]::Zero)
+        Assert-GlobalPointerTarget $hwnd $screenX $screenY $bounds $false
+        try {
+            [OCUWin32]::MouseInput($down, 0)
+            Start-Sleep -Milliseconds 30
+        } finally { [OCUWin32]::MouseInput($up, 0) }
         Start-Sleep -Milliseconds 60
     }
 }
@@ -343,19 +405,20 @@ function Send-MouseClick([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$b
     }
 }
 
-function Send-Drag([IntPtr]$hwnd, [int]$fromX, [int]$fromY, [int]$toX, [int]$toY) {
+function Send-Drag([IntPtr]$hwnd, [int]$fromX, [int]$fromY, [int]$toX, [int]$toY, $bounds) {
     if (Test-GlobalPointerFallbackEnabled) {
-        [void](Invoke-GlobalInputFocus $hwnd)
-        Send-GlobalMouseMove $fromX $fromY 80
-        [OCUWin32]::mouse_event($MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [IntPtr]::Zero)
-        $steps = 12
-        for ($i = 1; $i -le $steps; $i++) {
-            $x = [int][math]::Round($fromX + (($toX - $fromX) * $i / $steps))
-            $y = [int][math]::Round($fromY + (($toY - $fromY) * $i / $steps))
-            [void][OCUWin32]::SetCursorPos($x, $y)
-            Start-Sleep -Milliseconds 20
-        }
-        [OCUWin32]::mouse_event($MOUSEEVENTF_LEFTUP, 0, 0, 0, [IntPtr]::Zero)
+        Assert-GlobalPointerTarget $hwnd $toX $toY $bounds
+        if ([OCUWin32]::GetAsyncKeyState(1) -lt 0) { throw "Mouse button is already held; global input refused." }
+        Send-GlobalMouseMove $hwnd $fromX $fromY $bounds
+        try {
+            [OCUWin32]::MouseInput($MOUSEEVENTF_LEFTDOWN, 0)
+            for ($i = 1; $i -le 12; $i++) {
+                $x = [int][math]::Round($fromX + (($toX - $fromX) * $i / 12))
+                $y = [int][math]::Round($fromY + (($toY - $fromY) * $i / 12))
+                Send-GlobalMouseMove $hwnd $x $y $bounds $false
+                Start-Sleep -Milliseconds 20
+            }
+        } finally { [OCUWin32]::MouseInput($MOUSEEVENTF_LEFTUP, 0) }
         return
     }
     $start = New-Object OCUWin32+POINT
@@ -380,19 +443,15 @@ function Send-Drag([IntPtr]$hwnd, [int]$fromX, [int]$fromY, [int]$toX, [int]$toY
     [void][OCUWin32]::PostMessage($hwnd, $WM_LBUTTONUP, [IntPtr]::Zero, (ConvertTo-LParam $end.X $end.Y))
 }
 
-function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direction, [double]$pages) {
+function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direction, [double]$pages, $bounds) {
     if (Test-GlobalPointerFallbackEnabled) {
-        [void](Invoke-GlobalInputFocus $hwnd)
-        Send-GlobalMouseMove $screenX $screenY
+        Send-GlobalMouseMove $hwnd $screenX $screenY $bounds
         $delta = [int][math]::Round(120 * $pages)
-        if ($direction -eq "down" -or $direction -eq "right") {
-            $delta = -1 * $delta
-        }
+        if ($direction -eq "down" -or $direction -eq "left") { $delta = -1 * $delta }
         $message = $MOUSEEVENTF_WHEEL
-        if ($direction -eq "left" -or $direction -eq "right") {
-            $message = $MOUSEEVENTF_HWHEEL
-        }
-        [OCUWin32]::mouse_event($message, 0, 0, $delta, [IntPtr]::Zero)
+        if ($direction -eq "left" -or $direction -eq "right") { $message = $MOUSEEVENTF_HWHEEL }
+        Assert-GlobalPointerTarget $hwnd $screenX $screenY $bounds $false
+        [OCUWin32]::MouseInput($message, $delta)
         Start-Sleep -Milliseconds 120
         return
     }
@@ -403,7 +462,7 @@ function Send-Scroll([IntPtr]$hwnd, [int]$screenX, [int]$screenY, [string]$direc
     $lParam = ConvertTo-LParam $point.X $point.Y
     $delta = [int][math]::Round(120 * $pages)
     $message = $WM_MOUSEWHEEL
-    if ($direction -eq "down" -or $direction -eq "right") {
+    if ($direction -eq "down" -or $direction -eq "left") {
         $delta = -1 * $delta
     }
     if ($direction -eq "left" -or $direction -eq "right") {
@@ -469,35 +528,40 @@ function Get-VirtualKey([string]$key) {
     throw "Unsupported key: $key"
 }
 
-function Send-Key([IntPtr]$hwnd, [string]$key) {
-    if (Test-GlobalPointerFallbackEnabled) {
-        if (-not (Invoke-GlobalInputFocus $hwnd)) {
-            throw "Global key delivery can only reach the foreground window, but '$key' could not be focused on its target window."
-        }
+function Send-Key([IntPtr]$hwnd, [string]$key, [string]$method = "auto") {
+    if ($method -eq "global") {
         $parts = $key -split "\+"
-        $main = $parts[$parts.Length - 1]
-        $modifiers = @()
-        for ($i = 0; $i -lt $parts.Length - 1; $i++) {
-            switch ($parts[$i].ToLowerInvariant()) {
-                "ctrl" { $modifiers += 0x11 }
-                "control" { $modifiers += 0x11 }
-                "shift" { $modifiers += 0x10 }
-                "alt" { $modifiers += 0x12 }
-                "super" { $modifiers += 0x5B }
-                "win" { $modifiers += 0x5B }
-                "cmd" { $modifiers += 0x5B }
+        # Resolve and validate the entire chord before any key goes down.
+        $vk = Get-VirtualKey $parts[-1]
+        $modifiers = New-Object System.Collections.Generic.List[int]
+        foreach ($part in $parts[0..([math]::Max(0, $parts.Length - 2))]) {
+            if ($parts.Length -eq 1) { break }
+            $modifier = switch ($part.ToLowerInvariant()) {
+                "ctrl" { 0x11 }; "control" { 0x11 }; "shift" { 0x10 }; "alt" { 0x12 }
+                "super" { 0x5B }; "win" { 0x5B }; "cmd" { 0x5B }
+                default { throw "Unsupported key modifier: $part" }
             }
+            if (-not $modifiers.Contains($modifier)) { $modifiers.Add($modifier) }
         }
-        foreach ($modifier in $modifiers) {
-            [OCUWin32]::keybd_event([byte]$modifier, 0, 0, [IntPtr]::Zero)
+        $keys = @($modifiers.ToArray()) + @($vk)
+        foreach ($item in $keys) {
+            if ([OCUWin32]::GetAsyncKeyState($item) -lt 0) { throw "Requested key is already held; global input refused." }
         }
-        $vk = Get-VirtualKey $main
-        [OCUWin32]::keybd_event([byte]$vk, 0, 0, [IntPtr]::Zero)
-        Start-Sleep -Milliseconds 30
-        [OCUWin32]::keybd_event([byte]$vk, 0, $KEYEVENTF_KEYUP, [IntPtr]::Zero)
-        [array]::Reverse($modifiers)
-        foreach ($modifier in $modifiers) {
-            [OCUWin32]::keybd_event([byte]$modifier, 0, $KEYEVENTF_KEYUP, [IntPtr]::Zero)
+        Assert-GlobalInputTarget $hwnd
+        $pressed = New-Object System.Collections.Generic.List[int]
+        try {
+            foreach ($item in $keys) {
+                Assert-GlobalInputTarget $hwnd $false
+                $pressed.Add($item)
+                [OCUWin32]::KeyInput($item, $false)
+            }
+            Start-Sleep -Milliseconds 30
+        } finally {
+            $cleanupErrors = @()
+            for ($i = $pressed.Count - 1; $i -ge 0; $i--) {
+                try { [OCUWin32]::KeyInput($pressed[$i], $true) } catch { $cleanupErrors += $_ }
+            }
+            if ($cleanupErrors.Count -gt 0) { throw "Global key release failed: $($cleanupErrors -join '; ')" }
         }
         return
     }
@@ -885,6 +949,7 @@ function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [
             bundleIdentifier = $process.ProcessName
             pid = [int]$process.Id
         }
+        windowHandle = [long]$process.MainWindowHandle
         windowTitle = Limit-Text $process.MainWindowTitle $TextLimit
         windowBounds = $bounds
         screenshotPngBase64 = $image
@@ -1176,6 +1241,10 @@ try {
     } else {
         $process = Resolve-App $operation.app
         $hwnd = [IntPtr]$process.MainWindowHandle
+        if (($operation.expected_pid -gt 0 -and $process.Id -ne $operation.expected_pid) -or
+            ($operation.windowHandle -gt 0 -and [long]$hwnd -ne $operation.windowHandle)) {
+            throw "Target process/window changed; run get_app_state before acting."
+        }
         $windowBounds = $operation.windowBounds
         $element = Find-Element $process $operation.element
 
@@ -1216,7 +1285,7 @@ try {
                             y = [int][math]::Round($windowBounds.y + [double]$operation.y)
                         }
                     }
-                    Send-GlobalMouseClick $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
+                    Send-GlobalMouseClick $hwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count) $windowBounds
                 } elseif ($clickMethod -eq "sky_click") {
                     throw "click_method 'sky_click' is not supported on Windows"
                 } elseif ($clickMethod -eq "auto") {
@@ -1235,7 +1304,7 @@ try {
                             }
                         }
                         if (Test-GlobalPointerFallbackEnabled) {
-                            Send-GlobalMouseClick $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
+                            Send-GlobalMouseClick $hwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count) $windowBounds
                         } else {
                             Send-MouseClick $hwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
                         }
@@ -1256,12 +1325,12 @@ try {
                 if (-not $handled) {
                     Assert-UsableWindowBounds $windowBounds
                     $point = Get-ScreenPoint $operation.element.frame $windowBounds
-                    Send-Scroll $hwnd $point.x $point.y $operation.direction ([double]$operation.pages)
+                    Send-Scroll $hwnd $point.x $point.y $operation.direction ([double]$operation.pages) $windowBounds
                 }
             }
             "drag" {
                 Assert-UsableWindowBounds $windowBounds
-                Send-Drag $hwnd ([int][math]::Round($windowBounds.x + [double]$operation.from_x)) ([int][math]::Round($windowBounds.y + [double]$operation.from_y)) ([int][math]::Round($windowBounds.x + [double]$operation.to_x)) ([int][math]::Round($windowBounds.y + [double]$operation.to_y))
+                Send-Drag $hwnd ([int][math]::Round($windowBounds.x + [double]$operation.from_x)) ([int][math]::Round($windowBounds.y + [double]$operation.from_y)) ([int][math]::Round($windowBounds.x + [double]$operation.to_x)) ([int][math]::Round($windowBounds.y + [double]$operation.to_y)) $windowBounds
             }
             "type_text" {
                 if (-not (Invoke-TypeText $process $operation.text)) {
@@ -1269,7 +1338,7 @@ try {
                 }
             }
             "press_key" {
-                Send-Key $hwnd $operation.key
+                Send-Key $hwnd $operation.key $operation.key_method
             }
             "set_value" {
                 if ($null -eq $element) { throw "unknown element_index '$($operation.element.index)'" }

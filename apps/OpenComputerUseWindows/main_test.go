@@ -93,26 +93,6 @@ func TestScrollRequestIncludesWindowBounds(t *testing.T) {
 	}
 }
 
-func TestWindowsRuntimeDPIAndGlobalInputFallbackArePresent(t *testing.T) {
-	for _, snippet := range []string{
-		"SetProcessDpiAwarenessContext",
-		"SetThreadDpiAwarenessContext",
-		"DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2",
-		"OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS",
-		"[OCUWin32]::SetCursorPos",
-		"mouse_event",
-		"keybd_event",
-		"Test-GlobalPointerFallbackEnabled",
-	} {
-		if !strings.Contains(windowsRuntimeScript, snippet) {
-			t.Fatalf("Windows runtime missing global input guard %q", snippet)
-		}
-	}
-	if !strings.Contains(serverInstructions, "OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS") {
-		t.Fatal("MCP instructions must document the Windows global pointer gate")
-	}
-}
-
 func TestWindowsRejectsUnsupportedSkyClickBeforeSnapshotLookup(t *testing.T) {
 	x, y := 10.0, 20.0
 	result := newService().click("Notepad", "", &x, &y, 1, "left", "sky_click")
@@ -467,7 +447,11 @@ func TestWindowsKeyMethodSchemaAndUnsupportedSkyKey(t *testing.T) {
 		properties := tool.InputSchema["properties"].(map[string]any)
 		method := properties["key_method"].(map[string]any)
 		values := method["enum"].([]string)
-		if strings.Join(values, ",") != "auto,sky_key" {
+		expected := "auto,sky_key"
+		if name == "press_key" {
+			expected += ",global"
+		}
+		if strings.Join(values, ",") != expected {
 			t.Fatalf("%s key_method enum = %#v", name, values)
 		}
 	}

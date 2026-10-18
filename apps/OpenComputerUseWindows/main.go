@@ -26,6 +26,8 @@ var clickMethodValues = []string{"auto", "accessibility", "app_post", "sky_click
 
 var keyMethodValues = []string{"auto", "sky_key"}
 
+var pressKeyMethodValues = []string{"auto", "sky_key", "global"}
+
 var windowPlacementValues = []string{"keep", "agent_display", "restore"}
 
 const (
@@ -36,7 +38,7 @@ const (
 //go:embed runtime.ps1
 var windowsRuntimeScript string
 
-const serverInstructions = "Computer Use tools let you interact with Windows apps by performing UI actions.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Screenshot-coordinate actions require get_app_state to return a usable image; hidden, minimized, cloaked, off-screen, or degenerate windows may return only the accessibility tree. Windows actions use UI Automation patterns first and fall back to window messages when an app does not expose the needed pattern. The Windows runtime does not auto-launch apps, perform SetFocus, or use UIA text fallback by default, so background-capable actions do not intentionally steal the user's foreground focus. Setting OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1 enables click_method 'global' plus the real-pointer scroll/drag and real-key fallbacks, which move the system pointer and may change foreground focus; leave it unset to keep every action on UI Automation patterns and window messages."
+const serverInstructions = "Computer Use tools let you interact with Windows apps by performing UI actions.\n\nBegin by calling `get_app_state` every turn you want to use Computer Use to get the latest state before acting. The available tools are list_apps, get_app_state, click, perform_secondary_action, scroll, drag, type_text, press_key, and set_value.\n\nPrefer element-targeted interactions over coordinate clicks when an index for the targeted element is available. Screenshot-coordinate actions require get_app_state to return a usable image; hidden, minimized, cloaked, off-screen, or degenerate windows may return only the accessibility tree. Windows actions use UI Automation patterns first and fall back to window messages when an app does not expose the needed pattern. The Windows runtime does not auto-launch apps, perform SetFocus, or use UIA text fallback by default, so background-capable actions do not intentionally steal the user's foreground focus. Setting OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1 enables click_method 'global' plus real-pointer scroll/drag fallbacks; real keyboard input additionally requires press_key key_method=global, which move the system pointer and may change foreground focus; leave it unset to keep every action on UI Automation patterns and window messages. Auto press_key always uses window messages. Global input verifies the observed process/window, current geometry, foreground and pointer hit target, and refuses delivery if these cannot be confirmed."
 
 type toolDefinition struct {
 	Name        string         `json:"name"`
@@ -93,6 +95,7 @@ type elementRecord struct {
 }
 
 type appSnapshot struct {
+	WindowHandle        int64           `json:"windowHandle,omitempty"`
 	ScreenshotOmitted   bool            `json:"-"`
 	App                 appDescriptor   `json:"app"`
 	WindowTitle         string          `json:"windowTitle,omitempty"`
@@ -201,6 +204,9 @@ func validateScreenshotPNGBase64(encoded string) string {
 }
 
 type psRequest struct {
+	ExpectedPID       int            `json:"expected_pid,omitempty"`
+	WindowHandle      int64          `json:"windowHandle,omitempty"`
+	KeyMethod         string         `json:"key_method,omitempty"`
 	IncludeAX         *bool          `json:"include_ax,omitempty"`
 	IncludeScreenshot *bool          `json:"include_screenshot,omitempty"`
 	Tool              string         `json:"tool"`
@@ -333,7 +339,7 @@ func (s *service) callTool(name string, args map[string]any) toolCallResult {
 		}
 		return s.typeText(requiredString(args, "app"), requiredString(args, "text"), keyMethod)
 	case "press_key":
-		keyMethod, err := parseKeyMethod(optionalString(args, "key_method"))
+		keyMethod, err := parsePressKeyMethod(optionalString(args, "key_method"))
 		if err != nil {
 			return textResult(err.Error(), true)
 		}
@@ -529,10 +535,13 @@ func (s *service) pressKey(app, key, keyMethod string) toolCallResult {
 	if keyMethod == "sky_key" {
 		return textResult("key_method 'sky_key' is not supported on Windows", true)
 	}
+	if keyMethod == "global" && !globalPointerFallbacksEnabled() {
+		return textResult("key_method global requires OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1", true)
+	}
 	if s.currentSnapshot(app) == nil {
 		return textResult("No app state is available for "+app+". Run get_app_state before action tools.", true)
 	}
-	return s.actionResult(app, psRequest{Tool: "press_key", App: app, Key: key})
+	return s.actionResult(app, psRequest{Tool: "press_key", App: app, Key: key, KeyMethod: keyMethod})
 }
 
 func (s *service) setValue(app, elementIndex, value string) toolCallResult {
@@ -554,6 +563,10 @@ func (s *service) setValue(app, elementIndex, value string) toolCallResult {
 }
 
 func (s *service) actionResult(app string, request psRequest) toolCallResult {
+	if previous := s.currentSnapshot(app); previous != nil {
+		request.ExpectedPID = previous.App.PID
+		request.WindowHandle = previous.WindowHandle
+	}
 	snapshot, result := s.refreshSnapshot(app, request)
 	if result.IsError {
 		return result
@@ -883,6 +896,18 @@ func parseClickMethod(value string) (string, error) {
 	return "", fmt.Errorf("Invalid click_method %q. Expected one of: %s", value, strings.Join(clickMethodValues, ", "))
 }
 
+func parsePressKeyMethod(value string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "global" {
+		return normalized, nil
+	}
+	method, err := parseKeyMethod(value)
+	if err != nil {
+		return "", fmt.Errorf("Invalid key_method %q. Expected one of: auto, sky_key, global", value)
+	}
+	return method, nil
+}
+
 func globalPointerFallbacksEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS"))) {
 	case "1", "true", "yes", "on":
@@ -957,7 +982,7 @@ func toolDefinitions() []toolDefinition {
 			InputSchema: objectSchema(map[string]any{
 				"app":        stringProperty("App name or bundle identifier"),
 				"key":        stringProperty("Key or key-combination to press"),
-				"key_method": enumStringProperty("Keyboard delivery: auto (default) or sky_key. sky_key is the macOS SkyLight background-window path and is not supported on Windows.", keyMethodValues),
+				"key_method": enumStringProperty("Keyboard delivery: auto (default window messages), global (real keys, requires OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1), or macOS-only sky_key (unsupported on Windows).", pressKeyMethodValues),
 			}, []string{"app", "key"}),
 		},
 		{

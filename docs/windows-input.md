@@ -1,0 +1,38 @@
+# Windows 输入
+
+默认使用 UI Automation 和窗口消息。需要真实鼠标 / 按键时，在启动 OCU 的进程环境中设置：
+
+```powershell
+$env:OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS="1"
+```
+
+| 调用 | 默认 | 开启环境开关后 |
+| --- | --- | --- |
+| `app.click(index)` / `auto` | UIA 优先，再窗口消息 | UIA 优先，再真实指针 |
+| `app.click([x,y], {clickMethod:"global"})` | 拒绝 | 真实指针 |
+| `clickMethod:"app_post"` / `"accessibility"` | 各自指定的投递路径 | 保持指定路径 |
+| `app.drag(...)` | 窗口消息 | 真实指针 |
+| `app.scroll(index, direction, pages)` | ScrollPattern 优先，再窗口消息 | ScrollPattern 优先，再真实指针 |
+| `app.pressKey(key)` | 窗口消息 | 窗口消息 |
+| `app.pressKey(key, {keyMethod:"global"})` | 拒绝 | 真实按键 |
+
+原生 MCP / CLI 参数使用 `click_method`、`key_method`。`type_text` 不提供 global 方式；`sky_click` / `sky_key` 是 macOS 能力。
+
+真实输入会移动系统指针，可能将目标放到前台。发送前核对已观察的进程 / 窗口、当前几何、前台及坐标命中窗口。窗口移动、被其他窗口遮挡或无法切换前台时会报错，需要重新观察或让目标可见。不会模拟 Alt 强行抢前台，也不会在指定 app_post / accessibility 失败时切到真实输入。
+
+按键 / 鼠标用 SendInput，并检查是否插入成功。组合键先完整校验，再按下；异常时释放本次按下的键 / 按钮。系统完整性级别限制仍适用；进程强制终止也不能保证执行 finally。
+
+## 验证
+
+```powershell
+go -C apps/OpenComputerUseWindows test ./...
+go -C apps/OpenComputerUseWindows build -o "$env:TEMP/ocu-input.exe" .
+powershell.exe -NoProfile -File scripts/tests/windows-input.test.ps1 -RuntimePath apps/OpenComputerUseWindows/runtime.ps1
+pwsh -File scripts/tests/windows-input-smoke.ps1 -NativePath "$env:TEMP/ocu-input.exe"
+```
+
+桌面测试需要已登录 Windows 会话、Windows PowerShell、pwsh 和 Node.js，只操作自有临时窗口。验证默认窗口消息滚动回退、四向滚轮、截图坐标点击、拖拽、组合键、输入释放、移动 / 遮挡拒绝、屏幕右侧捕获与 Worker JS。夹具自定义 WM_MOUSEWHEEL / WM_MOUSEHWHEEL 处理并更新真实 ScrollViewer 偏移，结果由独立状态文件确认；不代表所有 GUI toolkit 都响应窗口消息。
+
+脚本记录实际窗口 DPI，并比较截图尺寸与独立物理窗口矩形。正常 DPI 的通过不能替代 125% / 150% / 多显示器实测。原有正常 / 1×1 / 最小化 / cloaked 截图检查也在同一 Windows PR 工作流运行。
+
+实现依据：[SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)、[SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)、[线程 DPI 上下文](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext)。

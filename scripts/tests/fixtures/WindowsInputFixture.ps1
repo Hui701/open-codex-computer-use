@@ -97,6 +97,8 @@ $timer.Add_Tick({
     switch($command.kind){
      "focus" {$window.Activate();$inputBox.Focus()}
      "move" {$window.Left+=40}
+     "move-button" {[System.Windows.Controls.Canvas]::SetLeft($button,220)}
+     "remove-button" {[void]$canvas.Children.Remove($button)}
      "right" {[InputFixtureNative]::PlaceRight($hwnd)}
      "reset-scroll" {$scroll.ScrollToVerticalOffset(60);$scroll.ScrollToHorizontalOffset(60)}
      "cover" {

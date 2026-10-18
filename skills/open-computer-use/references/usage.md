@@ -190,7 +190,7 @@ open-computer-use snapshot --max-tree-nodes 3000 --max-tree-depth 96 "Google Chr
 - `accessibility`: only invoke the element's accessibility action and require `element_index`.
 - `app_post`: bypass accessibility and post a mouse event directly to the target app/window without moving the system pointer. Supported on macOS and Windows.
 - `sky_click`: use the macOS private SkyLight background-window path with target-only synthetic focus and a Chromium primer click. It supports left single/double click on a current, on-screen window in the same Space and does not move the system pointer, deactivate the foreground app, change its key/first-responder state, or raise the target window. Its action-result snapshot refresh is read-only. Supported on macOS only.
-- `global`: bypass accessibility and use the desktop's global pointer path. Supported on macOS and Linux, and requires `OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1` because it may move the real pointer or change foreground focus.
+- `global`: bypass accessibility and use the desktop's global pointer path. Supported on macOS, Windows and Linux, and requires `OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1` because it may move the real pointer or change foreground focus.
 
 Use `app_post` for an exact blank-area or overlay click that must not be redirected to an accessibility descendant:
 
@@ -215,7 +215,7 @@ OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1 open-computer-use call click 
 
 Keep the environment override scoped as narrowly as possible. While it remains enabled, the existing `auto` route may also choose the global pointer path after accessibility cannot handle a click.
 
-Windows returns an unsupported error for `sky_click` and `global`; Linux returns an unsupported error for `app_post` and `sky_click`. An unsupported or failed explicit method does not fall back to `auto`.
+Windows returns an unsupported error for `sky_click`; Linux returns an unsupported error for `app_post` and `sky_click`. An unsupported or failed explicit method does not fall back to `auto`.
 
 ## Choosing a Keyboard Method
 
@@ -298,6 +298,16 @@ The macOS runtime uses Accessibility, ScreenCaptureKit, app-posted input events,
 ### Windows
 
 The Windows runtime uses UI Automation and Win32 message fallbacks. It must run in a logged-in desktop session. A detached SSH or service context may start the CLI but fail to see top-level windows.
+
+With `OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1`, Windows also supports
+explicit global clicks, auto click/scroll fallbacks and physical drags. Real
+keyboard input additionally requires an explicit call such as
+`await app.pressKey("ctrl+a", {keyMethod:"global"})`; auto key delivery stays on
+window messages. Explicit app_post/accessibility clicks keep their selected path.
+Global input can move the pointer and activate the target. Stale window geometry,
+occluded points and foreground failures are refused; observe again or make the
+target visible. The runtime does not synthesize Alt to force activation.
+
 
 ### Linux
 

@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $tokens = $null; $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($RuntimePath, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
-$names = @("Test-EnvFlagEnabled", "Test-GlobalPointerFallbackEnabled", "Assert-GlobalInputTarget", "Assert-CurrentWindowBounds", "Assert-GlobalPointerTarget", "Send-GlobalMouseMove", "Send-GlobalMouseClick", "Send-Drag", "Send-Scroll", "Send-Key", "Get-VirtualKey", "ConvertTo-LParam", "ConvertTo-WheelWParam")
+$names = @("Test-EnvFlagEnabled", "Test-GlobalPointerFallbackEnabled", "Assert-GlobalInputTarget", "Assert-CurrentWindowBounds", "Assert-GlobalPointerTarget", "Send-GlobalMouseMove", "Send-GlobalMouseClick", "Send-Drag", "Send-Scroll", "Send-Key", "Get-VirtualKey", "ConvertTo-LParam", "ConvertTo-WheelWParam", "Resolve-GlobalElementPoint", "Same-RuntimeId", "Get-ScreenPoint")
 $functions = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in $names }, $true)
 if ($functions.Count -ne $names.Count) { throw "Production input functions missing" }
 foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
@@ -16,7 +16,7 @@ public static class OCUWin32 {
  public struct POINT { public int X,Y; }
  public static IntPtr foreground = (IntPtr)42, root = (IntPtr)42;
  public static bool focusWorks = true, moveWorks = true, held = false;
- public static int moves, failMoveAt, failKey, keyUps;
+ public static int moves, failMoveAt, failKey, failKeyUp, loseFocusAfterKey, keyUps;
  public static long lastLParam;
  public static bool postWorks=true;
  public static List<string> events = new List<string>();
@@ -27,7 +27,7 @@ public static class OCUWin32 {
  public static short GetAsyncKeyState(int k) { return held ? (short)-32768 : (short)0; }
  public static bool SetCursorPos(int x,int y) { moves++; if(failMoveAt==moves) throw new Exception("move interrupted"); return moveWorks; }
  public static void MouseInput(uint flags,int data) { events.Add("mouse:"+flags+":"+data); }
- public static void KeyInput(int key,bool up) { events.Add("key:"+key+":"+up); if(up)keyUps++; if(!up&&key==failKey)throw new Exception("key interrupted"); }
+ public static void KeyInput(int key,bool up) { events.Add("key:"+key+":"+up); if(up)keyUps++; if(!up&&key==loseFocusAfterKey)foreground=(IntPtr)99; if(up&&key==failKeyUp)throw new Exception("key release interrupted"); if(!up&&key==failKey)throw new Exception("key interrupted"); }
  public static bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l) { events.Add("post:"+m); lastLParam=l.ToInt64(); return postWorks; }
 }
 "@
@@ -51,7 +51,7 @@ function Reset {
  $env:OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS="1"
  [OCUWin32]::foreground=[IntPtr]42; [OCUWin32]::root=[IntPtr]42
  [OCUWin32]::focusWorks=$true; [OCUWin32]::moveWorks=$true; [OCUWin32]::held=$false
- [OCUWin32]::moves=0; [OCUWin32]::failMoveAt=0; [OCUWin32]::failKey=0; [OCUWin32]::keyUps=0
+ [OCUWin32]::moves=0; [OCUWin32]::failMoveAt=0; [OCUWin32]::failKey=0; [OCUWin32]::failKeyUp=0; [OCUWin32]::loseFocusAfterKey=0; [OCUWin32]::keyUps=0
  [OCUWin32]::events.Clear(); [OCUWin32]::postWorks=$true; $script:currentBounds=$bounds
 }
 Reset
@@ -97,6 +97,14 @@ Reset
 Refuses { Send-Key 42 "ctrl+shift+a" "global" } "key interrupted"
 Assert (([OCUWin32]::events -join ",") -eq "key:17:False,key:16:False,key:65:False,key:65:True,key:16:True,key:17:True") "Interrupted chord did not release all keys in reverse order"
 Reset
+[OCUWin32]::failKeyUp=65
+Refuses { Send-Key 42 "ctrl+shift+a" "global" } "Global key release failed"
+Assert ([OCUWin32]::keyUps -eq 3) "One failed key release prevented remaining modifier cleanup"
+Reset
+[OCUWin32]::loseFocusAfterKey=17
+Refuses { Send-Key 42 "ctrl+a" "global" } "not foreground"
+Assert (([OCUWin32]::events -join ",") -eq "key:17:False,key:17:True") "Foreground loss sent the main key or left Ctrl held"
+Reset
 [OCUWin32]::held=$true
 Refuses { Send-Key 42 "ctrl+a" "global" } "already held"
 Refuses { Send-GlobalMouseClick 42 30 40 "left" 1 $bounds } "already held"
@@ -116,6 +124,21 @@ Send-Scroll 42 30 40 "right" 1 $bounds
 Send-Scroll 42 30 40 "up" 1 $bounds
 Send-Scroll 42 30 40 "down" 1 $bounds
 Assert (([OCUWin32]::events -join ",") -eq "mouse:4096:-120,mouse:4096:120,mouse:2048:120,mouse:2048:-120") "Wheel direction mismatch"
+Reset
+$record=[pscustomobject]@{runtimeId=@(1,2);frame=[pscustomobject]@{x=20;y=30;width=40;height=20}}
+$element=New-Object PSObject
+$element | Add-Member ScriptMethod GetRuntimeId { @(1,2) }
+$script:elementFrame=$record.frame
+function Get-ElementFrame($element,$bounds) { $script:elementFrame }
+Refuses { Resolve-GlobalElementPoint $null $record $bounds } "no longer available"
+$wrong=New-Object PSObject
+$wrong | Add-Member ScriptMethod GetRuntimeId { @(1,3) }
+Refuses { Resolve-GlobalElementPoint $wrong $record $bounds } "no longer available"
+$script:elementFrame=[pscustomobject]@{x=50;y=30;width=40;height=20}
+Refuses { Resolve-GlobalElementPoint $element $record $bounds } "Element geometry changed"
+$script:elementFrame=$record.frame
+$point=Resolve-GlobalElementPoint $element $record $bounds
+Assert ($point.x -eq 50 -and $point.y -eq 60 -and [OCUWin32]::events.Count -eq 0) "Element point did not use the verified current frame"
 Reset
 Send-GlobalMouseClick 42 30 40 "right" 2 $bounds
 Assert (([OCUWin32]::events -join ",") -eq "mouse:8:0,mouse:16:0,mouse:8:0,mouse:16:0") "Physical click count/button mismatch"

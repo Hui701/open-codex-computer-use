@@ -353,6 +353,21 @@ function Assert-GlobalPointerTarget([IntPtr]$hwnd, [int]$x, [int]$y, $bounds, [b
     }
 }
 
+function Resolve-GlobalElementPoint($element, $record, $bounds) {
+    if ($null -eq $element -or @($record.runtimeId).Count -eq 0 -or
+        -not (Same-RuntimeId @($element.GetRuntimeId()) @($record.runtimeId))) {
+        throw "Observed element is no longer available; run get_app_state before physical input."
+    }
+    $current = Get-ElementFrame $element $bounds
+    foreach ($field in @("x", "y", "width", "height")) {
+        if ($null -eq $current -or $null -eq $record.frame -or
+            [math]::Abs([double]$current.$field - [double]$record.frame.$field) -gt 1) {
+            throw "Element geometry changed; run get_app_state before physical input."
+        }
+    }
+    return Get-ScreenPoint $current $bounds
+}
+
 function Send-GlobalMouseMove([IntPtr]$hwnd, [int]$x, [int]$y, $bounds, [bool]$AllowActivation = $true) {
     Assert-GlobalPointerTarget $hwnd $x $y $bounds $AllowActivation
     if (-not [OCUWin32]::SetCursorPos($x, $y)) { throw "SetCursorPos failed" }
@@ -1286,6 +1301,7 @@ try {
                             y = [int][math]::Round($windowBounds.y + [double]$operation.y)
                         }
                     }
+                    if ($null -ne $operation.element) { $point = Resolve-GlobalElementPoint $element $operation.element $windowBounds }
                     Send-GlobalMouseClick $hwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count) $windowBounds
                 } elseif ($clickMethod -eq "sky_click") {
                     throw "click_method 'sky_click' is not supported on Windows"
@@ -1305,6 +1321,7 @@ try {
                             }
                         }
                         if (Test-GlobalPointerFallbackEnabled) {
+                            if ($null -ne $operation.element) { $point = Resolve-GlobalElementPoint $element $operation.element $windowBounds }
                             Send-GlobalMouseClick $hwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count) $windowBounds
                         } else {
                             Send-MouseClick $hwnd $point.x $point.y $operation.mouse_button ([int]$operation.click_count)
@@ -1326,6 +1343,7 @@ try {
                 if (-not $handled) {
                     Assert-UsableWindowBounds $windowBounds
                     $point = Get-ScreenPoint $operation.element.frame $windowBounds
+                    if (Test-GlobalPointerFallbackEnabled) { $point = Resolve-GlobalElementPoint $element $operation.element $windowBounds }
                     Send-Scroll $hwnd $point.x $point.y $operation.direction ([double]$operation.pages) $windowBounds
                 }
             }

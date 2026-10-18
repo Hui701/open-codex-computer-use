@@ -28,3 +28,5 @@ Main is `31a7d7d` (#101). The original PR adds a second process-global bridge te
 ## Desktop findings
 
 First hosted run passed Go, PowerShell and the existing observation smoke. The real default scroll test exposed a second coordinate bug: WM_MOUSEWHEEL/HWHEEL lParam was incorrectly converted to client coordinates. Preserve screen coordinates and report PostMessage failure, then rerun the actual scroll-offset check.
+
+The corrected real desktop run passed at `6a3c281` (Actions 39088560728), including physical input and Worker JS. Further review adds strict runtime-ID/current-frame checks for indexed physical fallback, with live moved/removed-element refusal and re-observation recovery checks.

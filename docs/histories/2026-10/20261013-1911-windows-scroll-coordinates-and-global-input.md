@@ -19,6 +19,7 @@
 - 修正原实现忽略前台失败、点击缺少目标核验、修饰键验证晚于按下且未 finally 释放，以及水平滚轮方向错误的问题。
 - 保留进程级 opt-in；Windows 真实键盘改为显式 press_key key_method=global，auto 按键保持窗口消息，显式 app_post / accessibility 点击不进入真实输入。
 - 使用带返回值检查的 SendInput，核对观察的 PID / HWND、最新物理几何、前台与 WindowFromPoint 根窗口；拒绝陈旧 / 遮挡目标。移除合成 Alt 焦点技巧，正常 SetForegroundWindow 失败即拒绝。组合键完整校验后才按下，按反序 finally 释放；拖拽 / 点击异常也释放按钮。
+- 为索引物理点击 / 滚动核对 UIA runtime ID 和最新元素 frame，拒绝元素消失后使用旧坐标，也拒绝同名替换或布局改变的元素；元素操作前重新观察可恢复。补真实移动 / 移除及纯控制流回归。
 - 首次真实滚动测试发现仍无界面偏移：WM_MOUSEWHEEL / WM_MOUSEHWHEEL 的 lParam 必须是屏幕坐标，旧路径却转成客户区坐标。移除转换，并检查 PostMessage 失败；回归同时覆盖请求带 bounds 和正确的屏幕消息坐标。
 - 补 Go 传输与门控测试、PowerShell 生产控制流故障注入测试，以及专用 WPF/Win32/native MCP/Worker JS fixture。继续使用既有 Windows PR 工作流，不使用本地桌面虚拟机。
 

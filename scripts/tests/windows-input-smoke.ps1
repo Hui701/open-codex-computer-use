@@ -155,6 +155,24 @@ try {
  OK (Call "click" @{click_method="global";x=$state.buttonX;y=$state.buttonY})
  Wait-For {(State).clicks -eq $clicks+1} "right-edge physical-coordinate click"
  Write-Output ("Moved/occluded target refusal and right-edge capture/click passed. Fixture window DPI="+(State).dpi+"; physical size="+(State).width+"x"+(State).height)
+ $full=Observe
+ $buttonMatch=[regex]::Matches((Text $full),'(?m)^\s*(\d+)\s+button Physical click target(?:\s|$)')
+ Assert ($buttonMatch.Count -eq 1) (Text $full)
+ $buttonIndex=$buttonMatch[0].Groups[1].Value
+ Command "move-button"
+ $cursor=[InputProbe]::Cursor()
+ $movedElement=Call "click" @{click_method="global";element_index=$buttonIndex}
+ Assert ($movedElement.isError -and (Text $movedElement) -match "Element geometry changed" -and [InputProbe]::Cursor() -eq $cursor) "Moved element used stale frame"
+ $full=Observe
+ $buttonMatch=[regex]::Match((Text $full),'(?m)^\s*(\d+)\s+button Physical click target(?:\s|$)')
+ $buttonIndex=$buttonMatch.Groups[1].Value; $clicks=(State).clicks
+ OK (Call "click" @{click_method="global";element_index=$buttonIndex})
+ Wait-For {(State).clicks -eq $clicks+1} "verified current element click"
+ Command "remove-button"
+ $cursor=[InputProbe]::Cursor()
+ $gone=Call "click" @{click_method="global";element_index=$buttonIndex}
+ Assert ($gone.isError -and (Text $gone) -match "no longer available" -and [InputProbe]::Cursor() -eq $cursor) "Removed element used stale coordinates"
+ Write-Output "Moved/removed element refusal and fresh AX recovery passed."
  Command "focus"
  & node (Join-Path $PSScriptRoot "windows-input-js-smoke.mjs") $NativePath ([string]$fixture.Id) $stateFile
  Assert ($LASTEXITCODE -eq 0) "Worker JS physical keyboard smoke failed"

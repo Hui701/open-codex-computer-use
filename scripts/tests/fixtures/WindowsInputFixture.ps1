@@ -118,7 +118,9 @@ $timer.Add_Tick({
  $state.dpi=[InputFixtureNative]::GetDpiForWindow($hwnd)
  $state.hwnd=$hwnd.ToInt64(); $state.foreground=[InputFixtureNative]::GetForegroundWindow().ToInt64()
  $state.text=$inputBox.Text; $state.verticalOffset=$scroll.VerticalOffset; $state.horizontalOffset=$scroll.HorizontalOffset
+ $state.buttonPresent=$canvas.Children.Contains($button)
  foreach($pair in @(@("button",$button),@("drag",$dragBox),@("input",$inputBox))) {
+  if(-not $canvas.Children.Contains($pair[1])){continue}
   $point=$pair[1].PointToScreen((New-Object System.Windows.Point(($pair[1].ActualWidth/2),($pair[1].ActualHeight/2))))
   $state[$pair[0]+"X"]=$point.X-$rect.Left; $state[$pair[0]+"Y"]=$point.Y-$rect.Top
  }
